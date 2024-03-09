@@ -1,1 +1,1 @@
-![picture] (.\src\picture.jpeg "picture")
+![picture](src\picture.jpeg "picture")
