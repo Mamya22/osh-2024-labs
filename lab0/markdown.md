@@ -1,4 +1,4 @@
-![picture](src\picture.jpeg "picture")
+![picture](src/picture.jpeg "picture")
 
 ``` cpp
 #include <stdio.h>
