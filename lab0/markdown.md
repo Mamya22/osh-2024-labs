@@ -14,3 +14,7 @@ void Initial_list(NumList *numSet)
     numSet->listSize = LIST_INIT_SIZE;
 } // 初始化顺序表，分配内存并且初始化长度为0
 ```
+
+$$
+	x = \frac{-b\pm\sqrt{b^2-4ac}}{2a}
+$$
