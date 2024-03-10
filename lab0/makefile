@@ -8,5 +8,8 @@ SRCS = main.cpp bubblesort.cpp bubblesort.hpp
 $(TARGET): $(SRCS)
 	$(CC) $(CFLAGS) $(VERSION) -o $@ $^
 
+debug: 
+	$(CC) $(CFLAGS) $(VERSION) -D DEBUG -o bubble_sort_2 $(SRCS)  
+
 clean:
 	rm -f $(TARGET)
