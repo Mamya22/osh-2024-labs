@@ -8,12 +8,12 @@
 - 去除`Power management and ACPI options`，得到文件大小为`4.2MB`
 - 裁剪`File sysyems`，文件大小为`3.6MB`
 - 裁剪`General architecture-dependent options`，文件大小为`3.5MB`
-
+<br>
 以下为后续裁减过程，提交的`bzImage`文件未裁减以下选项
 - 裁减 `Cryptographic API`, 文件大小为`3.4MB`
 - 裁减`Security operation`，文件大小为 `3.2MB`
 - 裁减`Processor type and features`，文件大小为 `2.8MB`
-
+<br>
 此时文件大小为2.8MB，故推测剩余未裁减的部分影响不大
 **故影响编译的主要部分大致有**
 - `Networking support（网络支持）` 
