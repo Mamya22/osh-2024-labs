@@ -2,15 +2,23 @@
 ### 【可选】影响编译时间和文件大小的主要部分
 编译过程如下：
 - 初始时，不修改内核，直接编译，得到文件大小为`12.9MB`
-- 去除 `Networking support`中可取消的模块，得到文件大小为`9.2MB`
-- 去除`Mitigations for speculative execution vulnerabilities`中可取消的模块，得到文件大小为`8.1MB`
+- 去除 `Networking support`，得到文件大小为`9.2MB`
+- 去除`Mitigations for speculative execution vulnerabilities`，得到文件大小为`8.1MB`
 - 去除`Device Drivers`，得到文件大小为`4.7MB`
 - 去除`Power management and ACPI options`，得到文件大小为`4.2MB`
 - 裁剪`File sysyems`，文件大小为`3.6MB`
-- 裁剪`General architecture-dependent optionx`，文件大小为`3.5MB`
-故影响编译的主要部分有 
-- `Networking support` 
-- `Device Driver`
+- 裁剪`General architecture-dependent options`，文件大小为`3.5MB`
+以下为后续裁减过程，提交的`bzImage`文件未裁减以下选项
+- 裁减 `Cryptographic API`, 文件大小为`3.4MB`
+- 裁减`Security operation`，文件大小为 `3.2MB`
+- 裁减`Processor type and features`，文件大小为 `2.8MB`
+此时文件大小为2.8MB，故推测剩余未裁减的部分影响不大
+**故影响编译的主要部分大致有**
+- `Networking support（网络支持）` 
+- `Device Driver（设备驱动）`
+- `Mitigations for speculative execution vulnerabilities`
+- `File systems`
+- `Power management and ACPI options` 
 ## 二、创建初始内存盘
 #### 显示学号
 ![stuID](pic/stuID.png)
