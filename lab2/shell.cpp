@@ -46,7 +46,40 @@ int BuildInnerCmd(std::vector<std::string> &args){
 				cd_ret = chdir(getenv("HOME"));
 			}
 			else if(args.size() == 2){
-				cd_ret = chdir(args[1].c_str());
+				if(args[1][0] == '~'){
+					std::string mainDir = getenv("HOME");
+					//mainDir = mainDir + args[1].substr(1);
+					mainDir = args[1].replace(0, 1, mainDir);
+					cd_ret = chdir(mainDir.c_str());
+				}
+				else if(args[1][0] == '$'){
+					size_t index = args[1].find_first_of('/');
+					std::string envirPath;
+					if(index == std::string::npos){
+						if(args[1].size() == 1){
+							std::cout << "Error cd: Failed to get environment path" << std::endl;
+							return 3;
+						}
+						else{
+		                    envirPath = getenv(args[1].substr(1, args[1].length()-1).c_str());
+							if(envirPath.empty()){
+								std::cout << "Error cd: Failed to get environment path" << std::endl;
+								return 3;
+							}
+	                        cd_ret = chdir(envirPath.c_str());
+						}
+					}
+					else {
+						envirPath = getenv(args[1].substr(1,index).c_str());
+	                        if(envirPath.empty()){
+								std::cout << "Error cd: Failed to get environment path" << std::endl;
+                                return 3;
+							}
+						cd_ret = chdir(envirPath.c_str());
+					}
+				}
+				else
+					cd_ret = chdir(args[1].c_str());
 			}
 			if(cd_ret == -1){
 				std::cout << "Error cd: Failed to change directory" << std::endl;
