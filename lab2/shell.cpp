@@ -18,76 +18,112 @@ int BuildPipeCmd(std::string &cmd){
 	if(pipe_cmd.empty()){
 		return 0;
 	}
-	size_t pipe_num = pipe_cmd.size();
-	if(pipe_num == 1){
-
+	size_t pipe_count = pipe_cmd.size();
+	if(pipe_count == 1){ // 无管道
+		std::vector<std::string> args = split(pipe_cmd[0], " ");
+		char *ptr[args.size() + 1];
+		for(size_t i = 0; i < args.size(); i++){
+			ptr[i] = &args[i][0];
+		}
+		ptr[args.size()] = nullptr;
+		if(execvp(args[0].c_str(), ptr) == -1){
+			std::cout << "Error pipe" << std::endl;
+			return -1;
+		}
 	}
-	// 需要创建 num - 1 个 fd，管道的内容需要传递，所以需要一个中间量,保存每次读端口，方便下一次使用
-	else{
-		int mid_bridge;
-		for(size_t i = 0; i < pipe_num; i++){
-			int fd[2];
-			pipe(fd);
-			pid_t pid = fork();
-			if(pid < 0){
-				std::cout << "Error pipe: can not create pipe" << std::endl;
-				return 3;
-			}
-			// 对子进程
-			if(pid  == 0){
-				if(i == 0){
-					close(fd[0]);
-					dup2(fd[1], STDOUT_FILENO); //第一个子进程传入数据
-				    close(fd[1]);
-				}
-				else if(i == pipe_num - 1){
-					close(fd[1]);
-					dup2(mid_bridge, STDIN_FILENO);
-					close(mid_bridge);
-				}
-				else{
-					dup2(mid_bridge, STDIN_FILENO); //其余子进程读入上一个
-					dup2(fd[1], STDOUT_FILENO);
-					close(fd[0]);
-					close(fd[1]);
-					close(mid_bridge);
-				}
-			}
-			// 对父进程
-			else{
-				mid_bridge = fd[0];
-				close(fd[1]);
-				close(fd[0]);
-
+	else{  //有管道
+		// 对于多重管道，需要初始化多个管道。
+		int fd[pipe_cmd.size() - 1][2]; // 需要pipe_cmd.size() - 1 个轨道
+		size_t i;
+		for(i = 0; i < pipe_cmd.size() - 1; i++){
+			if(pipe(fd[i]) == -1){
+				std::cout << "Error pipe: failed to create pipe" << std::endl;
+				return -1;
 			}
 		}
-		int status;
-		while(waitpid(-1,&status, WNOHANG) != -1){
-			continue;
+		pid_t pid; // 需要创建pipe_cmd.size()个子进程
+		size_t process;
+		for(process = 0; process < pipe_cmd.size(); process++){
+			pid = fork();
+			if(pid_ret == 0){
+				break;
+			}
 		}
-		 
-	}
-	/*
-	else if(pipe_num == 2){
-		int fd[2];
-		int ret = pipe(fd);
-		if(ret == -1){
-			std::cout <<"Error pipe: can not create pipe"<<std::endl;
-			return 4;
-		}
-		pid_t pid = fork();
 		if(pid == 0){
+			if(process == 0){ // 第一个子进程只输出
+				dup2(fd[0][1], STDOUT_FILENO);
+				close(fd[0][0]);
+			}
+			else if(process == pipe_cmd.size() - 1){
+				dup2(fd[pipe_cmd.size() - 2][0], STDIN_FILENO);
+				close(fd[pipe_cmd.size() - 2][1]);
+			}
+			else{
+				dup2(fd[process - 1][0], STDIN_FILENO);
+				dup2(fd[process][1], STDOUT_FILENO);
+				close(fd[process][0]);
+				close(fd[process - 1][1]);
+			}
+			for(size_t j = 0; j < pipe_cmd.size(); j++){
+				if(process != 0 && process != pipe_cmd.size()-1){
+					
+				}
+			}
+		}
+		/*
+		int fd[2];
+		if(pipe(fd) == -1){
+			std::cout << "Error pipe: failed to create pipe" << std::endl;
+			return -1;
+		}
+		pid_t pid = fork(); // 创建子进程
+		if(pid == 0){ //对子进程1
 			close(fd[0]);
-			dup2(fd[1], STDOUT_FILENO);
-
-		}
-		else if(pid > 0){
+			dup2(fd[1], STDOUT_FILENO); // 输出传递给写端口
 			close(fd[1]);
-			dup2(fd[0], STDIN_FILENO);
+			// 执行 使用execvp函数
+			std::vector<std::string> args = split(pipe_cmd[0], " ");
+			char *ptr[args.size() + 1];
+			for(size_t i = 0; i < args.size(); i++){
+				ptr[i] = &args[i][0];
+			}
+			ptr[args.size()] = nullptr;
+			if(execvp(args[0].c_str(), ptr) == -1){
+				std::cout << "Error pipe: failed to execute" << std::endl;
+				return -2;
+			}
 		}
+		else{
+			pid = fork();
+			if(pid == 0){
+				close(fd[1]);
+				dup2(fd[0], STDIN_FILENO);
+				close(fd[0]);
+			    std::vector<std::string> args = split(pipe_cmd[1], " ");
+			    char *ptr[args.size() + 1];
+				for(size_t i = 0; i < args.size(); i++){
+               		 ptr[i] = &args[i][0];
+             	}
+             	ptr[args.size()] = nullptr;
+        	   if(execvp(args[0].c_str(), ptr) == -1){
+              	    std::cout << "Error pipe: failed to execute" << std::endl;
+                	 return -2;
+				}
+			}
+			else{
+				close(fd[0]);
+				close(fd[1]);
+				while(wait(NULL) > 0);
+			}
+		}
+	*/	
 	}
-	*/
+	
+	return 0;
 }
+
+
+
 
 int BuildInnerCmd(std::vector<std::string> &args){
 	if(args.empty()){
@@ -176,6 +212,7 @@ int main(){
 		std::getline(std::cin, cmd);
 		std::vector<std::string> args = split(cmd, " ");
 		BuildInnerCmd(args);
+		BuildPipeCmd(cmd);
 	}
 }
 std::vector<std::string> split(std::string s, const std::string &delimiter){
