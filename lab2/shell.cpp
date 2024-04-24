@@ -45,7 +45,7 @@ int BuildPipeCmd(std::string &cmd){
 		size_t process;
 		for(process = 0; process < pipe_cmd.size(); process++){
 			pid = fork();
-			if(pid_ret == 0){
+			if(pid == 0){
 				break;
 			}
 		}
@@ -64,11 +64,40 @@ int BuildPipeCmd(std::string &cmd){
 				close(fd[process][0]);
 				close(fd[process - 1][1]);
 			}
-			for(size_t j = 0; j < pipe_cmd.size(); j++){
+			for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
 				if(process != 0 && process != pipe_cmd.size()-1){
-					
+					if(process == j || process -1 == j){
+						continue;
+					}
+					close(fd[j][0]);
+					close(fd[j][1]);
+				}
+				else{
+					if(j == process){
+						continue;
+					}
+					close(fd[j][0]);
+					close(fd[j][1]);
 				}
 			}
+
+			std::vector<std::string> args = split(pipe_cmd[process], " ");
+			char *ptr[args.size() + 1];
+            for(size_t i = 0; i < args.size(); i++){
+				ptr[i] = &args[i][0];
+			}
+			ptr[args.size()] = nullptr;
+         	if(execvp(args[0].c_str(), ptr) == -1){
+                std::cout << "Error pipe" << std::endl;
+                return -1;
+            }
+		}
+		else{
+			for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
+				close(fd[j][0]);
+				close(fd[j][1]);
+			}
+			while(wait(NULL) > 0);
 		}
 		/*
 		int fd[2];
