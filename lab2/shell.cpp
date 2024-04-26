@@ -17,18 +17,113 @@
 #include <sys/types.h>
 //#include <sys/stat.h>
 #include <fcntl.h>
+#include <cstring>
+#include <fstream>
 std::vector<std::string> split(std::string s, const std::string &delimiter);
-int BuildRedirCmd(std::vector<std::string> &args);
+//int BuildRedirCmd(std::vector<std::string> &args);
 int BuildPipeCmd(std::string &cmd);
 int BuildInnerCmd(std::vector<std::string> &args);
+void SignalHandle(int signum){
+	std::cout << std::endl;
+	std::cout << "$ ";
+	std::cout.flush(); // 清空缓冲
+}
+
+bool background;
+std::vector<pid_t> bg_process;
+char* currentPath = NULL;
+char lastPath[256];
+std::vector<std::string> history_cmd;
 int main(){
+	
 	std::ios::sync_with_stdio(false);
 	std::string cmd;
+	signal(SIGINT, SignalHandle); //忽略ctrl+c信号
+	//std::cout << getpid() << std::endl;
+	std::string historyPath = getenv("HOME");
+	historyPath = historyPath + "/.bash_history";
+	
+	std::ifstream rf_his;
+	rf_his.open(historyPath.c_str());
+	std::string his;
+	if(rf_his.is_open()){
+		std::cout << "open" <<std::endl;
+		//size_t line = 0;
+		while(getline(rf_his, his)){
+			history_cmd.push_back(his);
+		//std::cout << history_cmd[line];
+			//line++;
+		}
+	}
+	else std::cout << "unable to open file" << std::endl;
+	rf_his.close();
+	std::strcpy(lastPath, getcwd(NULL, 0));
 	while(true){
+		
+		background = false;
 		std::cout << "$ ";
 		std::getline(std::cin, cmd);
+		std::string his_cmd;
+		if(cmd[0] == '!'){
+			if(cmd[1] == '!'){
+				his_cmd = history_cmd[history_cmd.size() - 1];
+				cmd.replace(0,2,his_cmd);
+			}
+			else{
+				size_t i;
+				for(i = 1; i < cmd.length();i++ ){
+					if(cmd[i] != ' ')
+						break;
+				}
+				size_t k;
+				for(k = i; k < cmd.length(); k++){
+					if(cmd[k] == ' ')
+						break;
+				}
+				if(i == cmd.size()){
+					std::cout << "Error !: invalid number" << std::endl;
+					continue;
+				}
+				std::cout << cmd.substr(i,k-i) << std::endl;
+				std::istringstream ss(cmd.substr(i, k - i));
+				int num;
+				ss >> num;
+				his_cmd = history_cmd[num - 1];
+				cmd.replace(0, k , his_cmd);
+			}
+			std::cout << cmd << std::endl;
+		}	
+		history_cmd.push_back(cmd); // 加入当前指令
 		std::vector<std::string> args = split(cmd, " ");
+		currentPath = getcwd(NULL, 0);
+		//std::cout << lastPath << std::endl;
+		size_t j;
+		for(j = cmd.length() - 1; j >= 0; j--){
+			if(cmd[j] == '&'){
+				background = true;
+
+			}
+			else if(cmd[j] == ' ')
+				continue;	
+			if(cmd[j]!=' ' && cmd[j] != '&'){
+				break;
+			}
+		}
+		//std::cout << background << std::endl;
+		if(background){
+			cmd = cmd.substr(0, j + 1);
+		}
+		if(args[0] == "exit"){
+			if(args.size() == 1){
+				return 0;
+			}
+			int num = std::stoi(args[1]);
+			return num;
+		}
 		size_t innerCmd = BuildInnerCmd(args);
+		//strcpy(lastPath , currentPath);
+		free(currentPath);
+		//std::cout << cmd << std::endl;
 		if (innerCmd == 0){
 			BuildPipeCmd(cmd);
 		}
@@ -48,6 +143,7 @@ std::vector<std::string> split(std::string s, const std::string &delimiter){
 }
 
 // Inner command
+//char lastPath[256] = {0};
 int BuildInnerCmd(std::vector<std::string> &args){
 	if(args.empty()){
 		return 0;
@@ -110,16 +206,56 @@ int BuildInnerCmd(std::vector<std::string> &args){
 					cd_ret = chdir(envPath);
 				}
 			}
+			else if(args[1][0] == '-'){
+				cd_ret = chdir(lastPath);
+			}
 			else{
 				cd_ret = chdir(args[1].c_str());
 			}
-
+			strcpy(lastPath , currentPath);
 		}
+
 		if(cd_ret == -1){
 			std::cout << "Error cd: failed to change directory" << std::endl;
 			return -1;
 		}
 		return 1;
+	}		
+	if(args[0] == "wait"){ // 等待所有后台进程
+
+		for(size_t k = 0; k < bg_process.size(); k++){
+			waitpid(bg_process[k], NULL, 0); // 等待后台进程
+			std::cout << "pid: " << bg_process[k] << " Done!" << std::endl; 
+		}
+		for(size_t k = 0; k < bg_process.size(); k++){
+			bg_process.pop_back();
+		}
+		return 1;
+	}
+	if(args[0] == "history"){
+		if(args.size() > 2){
+			std::cout << "Error history: invalid argument" << std::endl;
+			return -1;
+		}
+		if(args.size() == 2){
+			int num;
+			std::istringstream ss(args[1]);
+			ss >> num;
+			if(num <=0 || num >(int)history_cmd.size()){
+				std::cout << "Error history: error history num" << std::endl;
+				return -1;
+			}
+			for(size_t i = history_cmd.size() - num- 1; i < history_cmd.size(); i++){
+				std::cout << "	" << i + 1 << "		" << history_cmd[i] << std::endl;
+			}
+			return 1;
+		}
+		else{
+			for(size_t i = 0; i < history_cmd.size(); i++){
+				std::cout << "	" << i + 1 << "		" << history_cmd[i] << std::endl;
+			}
+			return 1;
+		}
 	}
 	return 0;
 }
@@ -153,11 +289,19 @@ int BuildPipeCmd(std::string &cmd){
 		redir = 1;
 	}
 	pid_t pid1 = fork();
+	pid_t p_gid;
 	if(pid1 < 0){
 		std::cout << "Error fork" << std::endl;
 		return -1;
 	}
 	if(pid1 == 0){
+	/*
+		std::cout <<"1:pid  " <<  getpid() <<std::endl;
+		std::cout <<"1:ppid  " << getppid() << std::endl;
+		std::cout << "1:pgrp " << getpgrp() << std::endl;
+	*///	signal(SIGINT, SIG_DFL);
+		setpgid(pid1,pid1);
+		p_gid  = getpgid(getpid());
 		//处理无管道
 		if(cmd_count == 1){
 			int fd[2];
@@ -294,6 +438,10 @@ int BuildPipeCmd(std::string &cmd){
 				}
 			}
 			else{
+
+		std::cout <<"2 :  pid   " <<  getpid() <<std::endl;
+		std::cout << "2: ppid  " << getppid() << std::endl;
+		std::cout << "2: pgrp  " << getpgrp() <<std::endl;
 				for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
 					close(fd[j][0]);
 					close(fd[j][1]);
@@ -303,7 +451,22 @@ int BuildPipeCmd(std::string &cmd){
 		}
 	}
 	else{
-		while(wait(NULL) > 0);
+		setpgid(pid1,pid1);      //独立进程组
+		p_gid = getpgid(getpid());
+		signal(SIGTTOU, SIG_IGN); //忽略
+		//signal(SIGINT, 
+		
+		tcsetpgrp(0,pid1);       //设为前台进程
+		kill(pid1, SIGCONT);     //恢复运行
+		if(background){
+			waitpid(pid1, NULL, WNOHANG);
+			bg_process.push_back(pid1);
+			std::cout << pid1 << std::endl;
+		}
+		else
+			waitpid(pid1, NULL, 0);
+		//while(wait(NULL) > 0);
+		tcsetpgrp(0, p_gid);
 	}
 	return 0;
 } 
