@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <cstring>
 #include <fstream>
+#include <map>
 std::vector<std::string> split(std::string s, const std::string &delimiter);
 //处理外部命令
 int BuildPipeCmd(std::string &cmd);
@@ -39,7 +40,7 @@ std::vector<pid_t> bg_process; //记录后台进程
 char* currentPath = NULL;  //记录当前路径
 char lastPath[256];  //记录上次路径
 std::vector<std::string> history_cmd; // 记录历史命令
-
+std::map<std::string, std::string> alias_dict;
 int main(){
 	std::ios::sync_with_stdio(false);
     std::string cmd;
@@ -100,8 +101,9 @@ int main(){
 			std::cout << cmd << std::endl;
 		}	
        	history_cmd.push_back(cmd); // 加入当前指令 
+
         //处理命令
-        std::vector<std::string> args = split(cmd, " ");
+        //std::vector<std::string> args = split(cmd, " ");
 		currentPath = getcwd(NULL, 0);
         // 判断是否为后台命令
     	size_t j;
@@ -118,6 +120,14 @@ int main(){
 		if(background){
 			cmd = cmd.substr(0, j + 1);
 		} 
+		//
+		for(auto alias : alias_dict){
+			if(alias.first == cmd){
+				cmd = alias.second;
+				break;
+			}
+		}
+		std::vector<std::string> args = split(cmd, " ");
         //处理退出命令
 		if(args[0] == "exit"){
 			if(args.size() == 1){
@@ -126,6 +136,34 @@ int main(){
 			int num = std::stoi(args[1]);
 			return num;
 		}   
+		if(args[0] == "alias"){
+			if(args.size() == 1){
+				for(auto alias : alias_dict){
+					std::cout << "alias	  " << alias.first << " = '" << alias.second <<"'" <<std::endl;
+				}
+				if(alias_dict.size() == 0){
+					std::cout << "empty alias" <<std::endl;
+				}
+				continue;
+			}
+			std::string join_cmd ="";
+			for(size_t i = 1; i < args.size(); i++){
+				join_cmd = join_cmd + args[i] + " ";
+			}
+			size_t index = join_cmd.find("=");
+			if(index == std::string::npos){
+				std::cout << "Error alias: without '='" <<std::endl;
+				continue;
+			}
+			std::string other_name = join_cmd.substr(0,index);
+			remove_if(other_name.begin(),other_name.end(), isspace);//去除前后空格
+			join_cmd.substr(index + 1);
+			size_t first_comma_index = join_cmd.find("'");
+			size_t last_comma_index = join_cmd.find_last_of("'");
+			std::string r_cmd = join_cmd.substr(first_comma_index + 1, last_comma_index - first_comma_index -1);
+			alias_dict[other_name] = r_cmd;
+			continue;
+		}
         //处理内部命令
 		int innerCmd = BuildInnerCmd(args);  
         free(currentPath); 
@@ -278,14 +316,16 @@ int BuildPipeCmd(std::string &cmd){
 	size_t args_len = args.size(); 
 	size_t redir = 0;
 	size_t inRedir = count(args.begin(), args.end(), "<");
+	size_t textRedir = count(args.begin(), args.end(), "<<<");
 	size_t outRedir = count(args.begin(), args.end(), ">");
 	size_t appendRedir = count(args.begin(), args.end(), ">>");
    // std::string filename;
-    if(inRedir + outRedir + appendRedir >= 1){
+    if(inRedir + outRedir + appendRedir + textRedir >= 1){
 		redir = 1;
 	}
     pid_t pid1 = fork();
 	pid_t p_gid;
+
 	if(pid1 < 0){
 		std::cout << "Error fork" << std::endl;
 		return -1;
@@ -306,7 +346,7 @@ int BuildPipeCmd(std::string &cmd){
 			    args_ptr[args_len] = nullptr;
 			    if(execvp(args[0].c_str(), args_ptr) == -1){
 			    	std::cout << "Error exe" << std::endl;
-			    	return -1;
+			    	exit(0);
 			    }                
             }
         }   
@@ -371,7 +411,7 @@ int BuildPipeCmd(std::string &cmd){
 					ptr[args_2.size()] = nullptr;
          			if(execvp(args_2[0].c_str(), ptr) == -1){
                 		std::cout << "Error pipe" << std::endl;
-                		return -1;
+                		exit(0);
             		}
 				}
             }
@@ -405,7 +445,7 @@ int BuildPipeCmd(std::string &cmd){
 int BuildRedirCmd(std::vector<std::string> &args){
     // 分离出command;
     size_t pos = 0;
-    while(args[pos] != ">" && args[pos] != "<" && args[pos]!= ">>"){
+    while(args[pos] != ">" && args[pos] != "<" && args[pos]!= ">>" && args[pos]!="<<<"){
         pos++;
     }
     char *args_ptr[pos + 1];
@@ -418,6 +458,7 @@ int BuildRedirCmd(std::vector<std::string> &args){
         if(args[pos] == "<"){
             std::string filename = args[pos + 1];
             fd[0] = open(filename.c_str(), O_RDONLY);
+			// std::cout << fd[0] << std::endl;
 			dup2(fd[0], STDIN_FILENO);
 			if(fd[0] != STDIN_FILENO){
 				close(fd[0]);
@@ -441,6 +482,28 @@ int BuildRedirCmd(std::vector<std::string> &args){
 				close(fd[1]);
 			}   
             pos++;         
+        }
+        else if(args[pos] == "<<<"){
+            std::string text = args[pos + 1]; // 获取文本内容
+			text = text + "\n";
+            //转化为 < 标准输入流
+			// std::FILE* tmpf = std::tmpfile();
+			// std::fputs(text.c_str(), tmpf);
+			// std::rewind(tmpf);
+			// fd[0] = open()
+			char filename[100] = "test.XXXXXX";
+            fd[0] = mkstemp(filename);
+			unlink(filename);
+			//std::cout << fd[0] << std::endl;
+			if(fd[0] == -1){
+				std::cout << "Error <<<: Unable to create temp file" << std::endl;
+			}
+			write(fd[0], text.c_str(), text.length());
+			lseek(fd[0], SEEK_SET, 0);
+			dup2(fd[0], STDIN_FILENO);
+			close(fd[0]);
+			pos++;
+			//unlink(filename);
         }
         pos++;
     }        
