@@ -29,7 +29,7 @@
 <img src="pic/屏幕截图 2024-04-28 194145.png"  height = 320>
 
 #### 实现`CTRL+D` 退出shell
-<img src = "pic/image.png"  height = 320>
+<img src = "pic/image.png"  height = 380>
 
 ## 注：
 **输入命令时最好按照相应格式，如**
