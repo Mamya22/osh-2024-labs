@@ -44,6 +44,19 @@ void SignalHandle(int signum){
 	std::cout << "$\33[0m ";
 	std::cout.flush(); // 清空缓冲
 }
+// 处理EOF，则对输入流中内容进行判断
+int HandleEOF(){
+	char c;
+	if((c = std::cin.peek()) != EOF){
+		// ungetc(c,stdin);
+		return 0;
+	}
+	else{
+		std::cout << std::endl<< "exit" << std::endl;
+		return 1;
+	}
+	
+}
 int main(){
 	std::ios::sync_with_stdio(false);
     std::string cmd;
@@ -66,10 +79,16 @@ int main(){
     std::strcpy(lastPath, getcwd(NULL, 0));  
 
     while(true){
+		
         background = false;  // 默认为前台
+
 		currentPath = getcwd(NULL, 0);
 		std::cout << "\033[0;35m"<< currentPath << " ";
 		std::cout << "$\33[0m ";
+		int CtrlD = HandleEOF();
+		if(CtrlD == 1){
+			exit(0);
+		}
 		std::getline(std::cin, cmd);
 		std::string used_cmd;   
         //处理 ! 指令
