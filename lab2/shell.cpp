@@ -24,23 +24,26 @@ std::vector<std::string> split(std::string s, const std::string &delimiter);
 //处理外部命令
 int BuildPipeCmd(std::string &cmd);
 int BuildRedirCmd(std::vector<std::string> &args);
+int ExePipeCmd(std::vector<std::string> &pipe_cmd, std::vector<std::string> &args, int redir, size_t cmd_count);
 //处理内部命令
 int BuildInnerCmd(std::vector<std::string> &args);
 // 处理cd命令
 int BuildCdCmd(std::vector<std::string> &args);
-//处理Ctrl C
-void SignalHandle(int signum){
-	std::cout << std::endl;
-	std::cout << "$ ";
-	std::cout.flush(); // 清空缓冲
-}
 
 bool background;   //判断是否为后台
-std::vector<pid_t> bg_process; //记录后台进程
+// std::vector<pid_t> bg_process; //记录后台进程
 char* currentPath = NULL;  //记录当前路径
 char lastPath[256];  //记录上次路径
 std::vector<std::string> history_cmd; // 记录历史命令
 std::map<std::string, std::string> alias_dict;
+std::map<pid_t, std::string> bg_process;
+//处理Ctrl C
+void SignalHandle(int signum){
+	std::cout << std::endl;
+	std::cout << "\033[0;35m"<< currentPath << " ";
+	std::cout << "$\33[0m ";
+	std::cout.flush(); // 清空缓冲
+}
 int main(){
 	std::ios::sync_with_stdio(false);
     std::string cmd;
@@ -64,7 +67,9 @@ int main(){
 
     while(true){
         background = false;  // 默认为前台
-		std::cout << "$ ";
+		currentPath = getcwd(NULL, 0);
+		std::cout << "\033[0;35m"<< currentPath << " ";
+		std::cout << "$\33[0m ";
 		std::getline(std::cin, cmd);
 		std::string used_cmd;   
         //处理 ! 指令
@@ -104,7 +109,7 @@ int main(){
 
         //处理命令
         //std::vector<std::string> args = split(cmd, " ");
-		currentPath = getcwd(NULL, 0);
+		//currentPath = getcwd(NULL, 0);
         // 判断是否为后台命令
     	size_t j;
 		for(j = cmd.length() - 1; j >= 0; j--){
@@ -120,13 +125,15 @@ int main(){
 		if(background){
 			cmd = cmd.substr(0, j + 1);
 		} 
-		//
+		//把获得的指令替换成真正的指令
 		for(auto alias : alias_dict){
+			// std::cout << alias.first << "  " << alias.first.size()<<std::endl;
 			if(alias.first == cmd){
 				cmd = alias.second;
 				break;
 			}
 		}
+        // 开始进行指令运行
 		std::vector<std::string> args = split(cmd, " ");
         //处理退出命令
 		if(args[0] == "exit"){
@@ -156,7 +163,23 @@ int main(){
 				continue;
 			}
 			std::string other_name = join_cmd.substr(0,index);
-			remove_if(other_name.begin(),other_name.end(), isspace);//去除前后空格
+			// remove_if(other_name.begin(),other_name.end(), isspace);//去除前后空格
+			size_t head_index = 0;
+			while(head_index < other_name.size()){
+				if(other_name[head_index] !=' ')
+					break;
+				head_index++;
+			}
+			size_t tail_index = other_name.size() - 1;
+			while(tail_index >= 0){
+				if(other_name[tail_index] != ' ')
+					break;
+				tail_index--;
+			}
+			other_name = other_name.substr(head_index , tail_index - head_index + 1);
+			// std::cout <<head_index <<std::endl;
+			// std::cout <<tail_index <<std::endl;
+			// std::cout << other_name << "  " << other_name.size() <<std::endl;
 			join_cmd.substr(index + 1);
 			size_t first_comma_index = join_cmd.find("'");
 			size_t last_comma_index = join_cmd.find_last_of("'");
@@ -167,7 +190,7 @@ int main(){
         //处理内部命令
 		int innerCmd = BuildInnerCmd(args);  
         free(currentPath); 
-        //非内部命令  
+        //处理外部命令
         if (innerCmd == 0){
 			BuildPipeCmd(cmd);
 		}
@@ -212,13 +235,18 @@ int BuildInnerCmd(std::vector<std::string> &args){
     }
     // 处理后台等待命令
     if(args[0] == "wait"){
-		for(size_t k = 0; k < bg_process.size(); k++){
-			waitpid(bg_process[k], NULL, 0); // 等待后台进程
-			std::cout << "pid: " << bg_process[k] << "      Done!" << std::endl; 
+		for(auto pid : bg_process){
+			waitpid(pid.first, NULL, 0);
+			std::cout << "Done!  pid: " << pid.first << "	cmd: "<< pid.second << std::endl;
 		}
-		for(size_t k = 0; k < bg_process.size(); k++){
-			bg_process.pop_back();
-		}
+		bg_process.clear();
+		// for(size_t k = 0; k < bg_process.size(); k++){
+		// 	waitpid(bg_process[k], NULL, 0); // 等待后台进程
+		// 	std::cout << "pid: " << bg_process[k] << "      Done!" << std::endl; 
+		// }
+		// for(size_t k = 0; k < bg_process.size(); k++){
+		// 	bg_process.pop_back();
+		// }
 		return 1;
     }
     //处理历史命令
@@ -249,6 +277,7 @@ int BuildInnerCmd(std::vector<std::string> &args){
 	}
 	return 0;    
 }
+// 处理cd命令
 int BuildCdCmd(std::vector<std::string> &args){
     size_t args_num = args.size();
 	int cd_ret = 0;
@@ -258,6 +287,7 @@ int BuildCdCmd(std::vector<std::string> &args){
 	}
 	else if(args_num == 1){ // 处理仅有cd的情况
 		cd_ret = chdir(getenv("HOME")); // 获取HOME的环境变量，并转入
+		strcpy(lastPath , currentPath);
 	}
 	else if(args_num == 2){
 		if(args[1][0] == '~'){  // 处理 cd ~
@@ -324,15 +354,24 @@ int BuildPipeCmd(std::string &cmd){
 		redir = 1;
 	}
     pid_t pid1 = fork();
-	pid_t p_gid;
-
 	if(pid1 < 0){
 		std::cout << "Error fork" << std::endl;
 		return -1;
 	}
     if(pid1 == 0){
 		setpgid(pid1,pid1);
-		p_gid  = getpgid(getpid());
+		if(background){
+			signal(SIGINT, SIG_IGN);
+			signal(SIGTTOU, SIG_IGN);  
+			tcsetpgrp(0, getppid()); // 把父进程挂到前台
+		}
+		else{
+            // tcsetpgrp(0, cpid);
+
+			signal(SIGINT, SIG_DFL); //否则捕获信号
+			// signal(SIGINT,exitHandle);
+			signal(SIGTTOU, SIG_DFL);
+		}
 		//处理无管道
 		if(cmd_count == 1){
             if(redir){
@@ -351,96 +390,100 @@ int BuildPipeCmd(std::string &cmd){
             }
         }   
         else{
-    			// 对于多重管道，需要初始化多个管道。
-			int fd[cmd_count - 1][2]; // 需要pipe_cmd.size() - 1 个轨道
-			size_t i;
-			for(i = 0; i < cmd_count - 1; i++){
-				if(pipe(fd[i]) == -1){
-					std::cout << "Error pipe: failed to create pipe" << std::endl;
-					return -1;
-				}
-			}
-			pid_t pid; // 需要创建pipe_cmd.size()个子进程
-			size_t process; // 子进程继承父进程
-			for(process = 0; process < pipe_cmd.size(); process++){
-				pid = fork();
-				if(pid == 0){
-					break;
-				}
-			}
-			if(pid == 0){
-				if(process == 0){ // 第一个子进程只输出
-					dup2(fd[0][1], STDOUT_FILENO);
-					close(fd[0][0]);
-				}
-				else if(process == pipe_cmd.size() - 1){
-					dup2(fd[pipe_cmd.size() - 2][0], STDIN_FILENO);
-					close(fd[pipe_cmd.size() - 2][1]);
-				}
-				else{
-					dup2(fd[process - 1][0], STDIN_FILENO);
-					dup2(fd[process][1], STDOUT_FILENO);
-					close(fd[process][0]);
-					close(fd[process - 1][1]);
-				}
-				for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
-					if(process != 0 && process != pipe_cmd.size()-1){
-						if(process == j || process -1 == j){
-							continue;
-						}
-						close(fd[j][0]);
-						close(fd[j][1]);
-					}
-					else{
-						if(j == process){
-							continue;
-						}
-						close(fd[j][0]);
-						close(fd[j][1]);
-					}
-				}
-				if(redir && process == cmd_count - 1){
-					BuildRedirCmd(args);
-				}        
-                else{
-					std::vector<std::string> args_2 = split(pipe_cmd[process], " ");
-					char *ptr[args_2.size() + 1];
-            			for(size_t i = 0; i < args_2.size(); i++){
-						ptr[i] = &args_2[i][0];
-					}
-					ptr[args_2.size()] = nullptr;
-         			if(execvp(args_2[0].c_str(), ptr) == -1){
-                		std::cout << "Error pipe" << std::endl;
-                		exit(0);
-            		}
-				}
-            }
-            else{
-				for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
-					close(fd[j][0]);
-					close(fd[j][1]);
-				}
-				while(wait(NULL) > 0);                
-            }
+			ExePipeCmd(pipe_cmd, args, redir, cmd_count);
+			exit(0);
         }         
     }
     else{
 		setpgid(pid1,pid1);      //独立进程组
-		p_gid = getpgid(getpid());
-		signal(SIGTTOU, SIG_IGN); //忽略
-		//signal(SIGINT, 
-		tcsetpgrp(0,pid1);       //设为前台进程
-		kill(pid1, SIGCONT);     //恢复运行
 		if(background){
+			tcsetpgrp(0, getpgrp());
 			waitpid(pid1, NULL, WNOHANG);
-			bg_process.push_back(pid1);
-			std::cout << pid1 << std::endl;
+			bg_process[pid1] = cmd;
+			// std::cout << pid1 << std::endl;
 		}
-		else
-			waitpid(pid1, NULL, 0);
-		tcsetpgrp(0, p_gid);        
+		else{
+			tcsetpgrp(0, pid1);
+		    signal(SIGTTOU, SIG_IGN); 
+			waitpid(pid1, NULL, 0);			
+		}
+		tcsetpgrp(0, getpgrp());        
     }
     return 0;
+}
+int ExePipeCmd(std::vector<std::string> &pipe_cmd, std::vector<std::string> &args, int redir, size_t cmd_count){
+    // 对于多重管道，需要初始化多个管道。
+	int fd[cmd_count - 1][2]; // 需要pipe_cmd.size() - 1 个轨道
+	size_t i;
+	for(i = 0; i < cmd_count - 1; i++){
+		if(pipe(fd[i]) == -1){
+			std::cout << "Error pipe: failed to create pipe" << std::endl;
+			return -1;
+		}
+	}
+	pid_t pid; // 需要创建pipe_cmd.size()个子进程
+	size_t process; // 子进程继承父进程
+	for(process = 0; process < pipe_cmd.size(); process++){
+		pid = fork();
+		if(pid == 0){
+			break;
+		}
+	}
+	if(pid == 0){
+		if(process == 0){ // 第一个子进程只输出
+			dup2(fd[0][1], STDOUT_FILENO);
+			close(fd[0][0]);
+		}
+		else if(process == pipe_cmd.size() - 1){
+			dup2(fd[pipe_cmd.size() - 2][0], STDIN_FILENO);
+			close(fd[pipe_cmd.size() - 2][1]);
+		}
+		else{
+			dup2(fd[process - 1][0], STDIN_FILENO);
+			dup2(fd[process][1], STDOUT_FILENO);
+			close(fd[process][0]);
+			close(fd[process - 1][1]);
+		}
+		for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
+			if(process != 0 && process != pipe_cmd.size()-1){
+				if(process == j || process -1 == j){
+					continue;
+				}
+				close(fd[j][0]);
+				close(fd[j][1]);
+			}
+			else{
+				if(j == process){
+					continue;
+				}
+				close(fd[j][0]);
+				close(fd[j][1]);
+			}
+		}
+		if(redir && process == cmd_count - 1){
+			BuildRedirCmd(args);
+		}        
+        else{
+			std::vector<std::string> args_2 = split(pipe_cmd[process], " ");
+			char *ptr[args_2.size() + 1];
+    			for(size_t i = 0; i < args_2.size(); i++){
+				ptr[i] = &args_2[i][0];
+			}
+			ptr[args_2.size()] = nullptr;
+    		if(execvp(args_2[0].c_str(), ptr) == -1){
+        		std::cout << "Error pipe" << std::endl;
+        		exit(0);
+    		}
+		}
+    }
+    else{
+		for(size_t j = 0; j < pipe_cmd.size() - 1; j++){
+			close(fd[j][0]);
+			close(fd[j][1]);
+		}
+		while(wait(NULL) > 0);                
+    }
+	return 0;
 }
 int BuildRedirCmd(std::vector<std::string> &args){
     // 分离出command;
