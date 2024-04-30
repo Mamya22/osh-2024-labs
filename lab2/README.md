@@ -34,6 +34,7 @@
 
 #### 实现`CTRL+D` 退出shell
 输入的命令的第一个字符需要是CTRL+D 
+
 <img src = "pic/image.png"  height = 380>
 
 ## 注：
