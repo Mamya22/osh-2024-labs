@@ -377,6 +377,7 @@ int BuildExternelCmd(std::string &cmd){
 			signal(SIGINT, SIG_DFL); //否则捕获信号
 			// signal(SIGINT,exitHandle);
 			signal(SIGTTOU, SIG_DFL);
+			tcsetpgrp(0, pid1);
 		}
 		//处理无管道
 		if(cmd_count == 1){
