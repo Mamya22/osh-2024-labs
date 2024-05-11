@@ -1,4 +1,3 @@
-// server.c
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,6 +6,9 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <pthread.h>
 
 #define BIND_IP_ADDR "127.0.0.1"
 #define BIND_PORT 8000
@@ -17,59 +19,11 @@
 #define MAX_CONN 20
 
 #define HTTP_STATUS_200 "200 OK"
+#define HTTP_STATUS_500 "500 Internal Server Error"
+#define HTTP_STATUS_404 "404 Not Found"
 
-void parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len)
-{
-    char* req = request;
-
-    // 一个粗糙的解析方法，可能有 BUG！
-    // 获取第一个空格 (s1) 和第二个空格 (s2) 之间的内容，为 PATH
-    ssize_t s1 = 0;
-    while(s1 < req_len && req[s1] != ' ') s1++;
-    ssize_t s2 = s1 + 1;
-    while(s2 < req_len && req[s2] != ' ') s2++;
-
-    memcpy(path, req + s1 + 1, (s2 - s1 - 1) * sizeof(char));
-    path[s2 - s1 - 1] = '\0';
-    *path_len = (s2 - s1 - 1);
-}
-
-void handle_clnt(int clnt_sock)
-{
-    // 一个粗糙的读取方法，可能有 BUG！
-    // 读取客户端发送来的数据，并解析
-    char* req_buf = (char*) malloc(MAX_RECV_LEN * sizeof(char));
-    // 将 clnt_sock 作为一个文件描述符，读取最多 MAX_RECV_LEN 个字符
-    // 但一次读取并不保证已经将整个请求读取完整
-    ssize_t req_len = read(clnt_sock, req_buf, MAX_RECV_LEN);
-
-    // 根据 HTTP 请求的内容，解析资源路径和 Host 头
-    char* path = (char*) malloc(MAX_PATH_LEN * sizeof(char));
-    ssize_t path_len;
-    parse_request(req_buf, req_len, path, &path_len);
-
-    // 构造要返回的数据
-    // 这里没有去读取文件内容，而是以返回请求资源路径作为示例，并且永远返回 200
-    // 注意，响应头部后需要有一个多余换行（\r\n\r\n），然后才是响应内容
-    char* response = (char*) malloc(MAX_SEND_LEN * sizeof(char)) ;
-    sprintf(response,
-        "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n%s",
-        HTTP_STATUS_200, path_len, path);
-    size_t response_len = strlen(response);
-
-    // 通过 clnt_sock 向客户端发送信息
-    // 将 clnt_sock 作为文件描述符写内容
-    write(clnt_sock, response, response_len);
-
-    // 关闭客户端套接字
-    close(clnt_sock);
-
-    // 释放内存
-    free(req_buf);
-    free(path);
-    free(response);
-}
-
+int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len);
+void handle_clnt(int clnt_sock);
 int main(){
     // 创建套接字，参数说明：
     //   AF_INET: 使用 IPv4
@@ -97,8 +51,7 @@ int main(){
     struct sockaddr_in clnt_addr;
     socklen_t clnt_addr_size = sizeof(clnt_addr);
 
-    while (1) // 一直循环
-    {
+    while(1){
         // 当没有客户端连接时，accept() 会阻塞程序执行，直到有客户端连接进来
         int clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_addr, &clnt_addr_size);
         // 处理客户端的请求
@@ -109,4 +62,166 @@ int main(){
     // 关闭套接字
     close(serv_sock);
     return 0;
+}
+int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len){
+    char* req = request;
+    //判断是否为GET，以下说明请求头不对
+    if(strlen(req) < 5 || strncmp(req, "GET /", 5) != 0){
+        return -1;
+    }
+    // 获取路径
+    size_t begin_index = 3;
+    req[begin_index] = '.';
+    size_t end_index = 5;
+    ssize_t layer = 0;
+    
+    while (end_index - begin_index < MAX_PATH_LEN){
+        if(req[end_index] == ' '){
+            if(req[end_index - 1] == '.' && req[end_index - 2] == '.'){
+                layer--;
+            }
+            if(layer < 0){
+                return -1; // 表示跳出当前目录
+            }
+            break;
+        }
+        if(req[end_index] == '/'){
+            if(req[end_index - 1] == '.' && req[end_index] == '.'){
+                layer--;
+            }
+            else if(req[end_index - 1] != '.'){
+                layer++;
+            }
+        }
+        if(layer < 0){
+            return -1;
+        }
+        end_index++;
+    }
+    if(end_index - begin_index >= MAX_PATH_LEN){
+        return -1;
+    }
+    memcpy(path, req + begin_index, (end_index - begin_index + 1) * sizeof(char));
+    path[end_index - begin_index] = '\0';
+    // printf("%s\n", path);
+    *path_len = end_index - begin_index;
+    // 判断必要请求内容是否完整
+    char *restHead = "HTTP/1.0\r\nHost: 127.0.0.1:8000"; 
+    if(strncmp(req + end_index + 1, restHead, strlen(restHead)) != 0){
+        return -1;
+    }
+    return 0;
+}
+void handle_clnt(int clnt_sock){
+    // 读取客户端发送来的数据，并解析
+    char* req_buf = (char*) malloc( MAX_RECV_LEN * sizeof(char));
+    char* req = (char*) malloc( MAX_RECV_LEN * sizeof(char)); 
+    char* path = (char*) malloc(MAX_PATH_LEN * sizeof(char));
+    char* response = (char*) malloc(MAX_SEND_LEN * sizeof(char)) ;
+    if(!req_buf || !req || !path || !response){
+        perror("Malloc Error!\n");
+        exit(1);
+    }
+    req[0] = '\0';
+    ssize_t req_len = 0;
+    // 读取
+    while(1){
+        req_len = read(clnt_sock, req_buf, MAX_RECV_LEN - 1);  
+        if(req_len < 0){ // 处理读取错误
+            perror("failed to read client_socket\n");
+            exit(1);
+        }
+        //说明上一次循环没达到退出条件，但读完数据，即有错误
+        if(req_len == 0){ // 处理格式错误
+            perror("Error request tail\n");
+            exit(1);
+        }
+        req_buf[req_len] = '\0';
+        strcat(req, req_buf);
+        //后四个字符为\r\n\r\n, 则说明读取完成
+        if(strcmp(req + strlen(req) - 4, "\r\n\r\n") == 0){
+            break;
+        }
+    }
+    // 根据 HTTP 请求的内容，解析资源路径和 Host 头
+    req_len = strlen(req);
+    ssize_t path_len;
+    
+    int parse_ret = parse_request(req, req_len, path, &path_len);   
+  
+    //处理500
+    if(parse_ret == -1){
+        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
+        size_t response_len = strlen(response);
+        if(write(clnt_sock,response,response_len) == -1){
+            perror("Write Error\n");
+            exit(1);
+        }
+        close(clnt_sock);
+        free(req);
+        free(req_buf);
+        free(path);
+        free(response);
+        return;
+    }
+    // 处理文件
+    int fd = open(path, O_RDONLY);
+    printf("fd%d\n",fd);
+    if(fd < 0){ //文件打开失败，4004错误
+        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
+        size_t response_len = strlen(response);
+        if(write(clnt_sock,response,response_len) == -1){
+            perror("Write Error\n");
+            exit(1);
+        }
+        close(clnt_sock);
+        free(req);
+        free(req_buf);
+        free(path);
+        free(response);
+        return;
+    }    
+    //判断文件是否是目录
+    struct stat fs;
+    stat(path, &fs);
+    if(S_ISDIR(fs.st_mode)){
+        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
+        size_t response_len = strlen(response);
+        if(write(clnt_sock,response,response_len) == -1){
+            perror("Write Error\n");
+            exit(1);
+        }
+        close(clnt_sock);
+        free(req);
+        free(req_buf);
+        free(path);
+        free(response);
+        return;
+    } 
+    //正常处理   
+    sprintf(response,
+        "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n",
+        HTTP_STATUS_200, (size_t)(fs.st_size));
+    size_t response_len = strlen(response);
+    if(write(clnt_sock,response,response_len) == -1){
+        perror("Write Error\n");
+        exit(1);
+    }
+    //写回读取文件内容
+    while((response_len = read(fd, response, MAX_SEND_LEN)) > 0){
+        printf("res :%s\n", response);
+        if(write(clnt_sock, response, response_len) == -1){
+            perror("Write Error\n");
+            exit(1);
+        }
+    }
+    if(response_len == -1){ //错误
+        perror("Read Error\n");
+        exit(1);
+    }
+    close(clnt_sock);
+    free(req);
+    free(req_buf);
+    free(path);
+    free(response);
 }
