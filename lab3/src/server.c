@@ -17,13 +17,36 @@
 #define MAX_PATH_LEN 1024
 #define MAX_HOST_LEN 1024
 #define MAX_CONN 20
+#define THREAD_MAX_NUM 100
+#define QUEUE_SIZE 1000
 
 #define HTTP_STATUS_200 "200 OK"
 #define HTTP_STATUS_500 "500 Internal Server Error"
 #define HTTP_STATUS_404 "404 Not Found"
+void handleError(char *error){
+    perror(error);
+    exit(EXIT_FAILURE);
+}
+typedef struct{
+    pthread_mutex_t lock;
+    pthread_cond_t queue_not_full;
+    pthread_cond_t queue_not_empty;
+    pthread_t *threads;  //存放线程的tid
+    int *tasks_queue;
+    int thread_num; // 线程数
+    int queue_front;
+    int queue_tail;
+    int queue_size; // 任务数
+    int queue_max_size; //最大任务数
+    int shutdown;  //是否关闭
+}threadpool;
+
 
 int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len);
 void handle_clnt(int clnt_sock);
+threadpool *threadpool_create(int queue_max_size, int thread_num);
+void threadpool_add_task(int clnt_sock, threadpool *pool);
+void *threadpool_op(void *thread_pool);
 int main(){
     // 创建套接字，参数说明：
     //   AF_INET: 使用 IPv4
@@ -50,18 +73,91 @@ int main(){
     // 接收客户端请求，获得一个可以与客户端通信的新的生成的套接字 clnt_sock
     struct sockaddr_in clnt_addr;
     socklen_t clnt_addr_size = sizeof(clnt_addr);
-
+    threadpool *pool = threadpool_create(QUEUE_SIZE,THREAD_MAX_NUM);
     while(1){
         // 当没有客户端连接时，accept() 会阻塞程序执行，直到有客户端连接进来
         int clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_addr, &clnt_addr_size);
         // 处理客户端的请求
-        handle_clnt(clnt_sock);
+        // handle_clnt(clnt_sock);
+        if(clnt_sock == -1){
+            handleError("accept error\n");
+        }
+        threadpool_add_task(clnt_sock, pool);
     }
 
     // 实际上这里的代码不可到达，可以在 while 循环中收到 SIGINT 信号时主动 break
     // 关闭套接字
     close(serv_sock);
     return 0;
+}
+threadpool *threadpool_create(int queue_max_size, int thread_num){
+    threadpool *pool = (threadpool *)malloc(sizeof(threadpool));
+    if(!pool){
+        handleError("threadpool malloc fail\n");
+    }
+    pool->queue_front = 0;
+    pool->queue_size  = 0;
+    pool->thread_num = thread_num;
+    pool->queue_tail = 0;
+    pool->shutdown = 0;
+    pool->queue_max_size = queue_max_size;
+    //为线程开辟相应的空间
+    pool->threads = (pthread_t *)malloc(thread_num * sizeof(pthread_t));
+    if(!pool->threads){
+        handleError("threads malloc fail\n");
+    }
+    pool->tasks_queue = (int *)malloc(sizeof(int) * queue_max_size);
+    if(!pool->tasks_queue){
+        handleError("tasks_queue malloc fail\n");
+    }
+    //初始化互斥锁
+    if(pthread_mutex_init(&(pool->lock), NULL) != 0){
+        handleError("lock init fail\n");
+    }
+    if(pthread_cond_init(&(pool->queue_not_empty), NULL) != 0){
+        handleError("queue_not_empty init fail\n");
+    }
+    if(pthread_cond_init(&(pool->queue_not_full), NULL) != 0){
+        handleError("queue_not_full init fail\n");
+    }
+    // 启动线程
+    for(int i = 0; i < thread_num; i++){
+        pthread_create(&(pool->threads[i]), NULL, threadpool_op, (void*)pool);
+    }
+    return pool;
+}
+
+
+void threadpool_add_task(int clnt_sock, threadpool *pool){
+    pthread_mutex_lock(&(pool->lock));
+    //队满则阻塞
+    while(pool->queue_size == pool->queue_max_size){
+        pthread_cond_wait(&(pool->queue_not_full), &(pool->lock));
+    }
+    pool->queue_size++;
+    pool->tasks_queue[pool->queue_tail] = clnt_sock;
+    pool->queue_tail = (pool->queue_tail + 1) % (pool->queue_max_size);
+    pthread_cond_broadcast(&(pool->queue_not_empty));
+    pthread_mutex_unlock(&(pool->lock));
+}
+void *threadpool_op(void *thread_pool){
+    threadpool *pool = (threadpool *)thread_pool;
+    int task;
+    while(1){
+        pthread_mutex_lock(&(pool->lock)); //
+        //队列为空
+        while(pool->queue_size == 0 && (!pool->shutdown)){
+            //等待队列不为空
+            pthread_cond_wait(&(pool->queue_not_empty), &(pool->lock));
+        }
+        int clnt_sock = pool->tasks_queue[pool->queue_front];
+        pool->queue_size--;
+        pool->queue_front = (pool->queue_front + 1) % (pool->queue_max_size);
+        pthread_cond_broadcast(&(pool->queue_not_full));
+        //取出任务后释放线程池锁
+        pthread_mutex_unlock(&(pool->lock));
+        handle_clnt(clnt_sock);
+    }
 }
 int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len){
     char* req = request;
