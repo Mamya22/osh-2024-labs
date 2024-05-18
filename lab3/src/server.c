@@ -16,7 +16,7 @@
 #define MAX_SEND_LEN 1048576
 #define MAX_PATH_LEN 1024
 #define MAX_HOST_LEN 1024
-#define MAX_CONN 20
+#define MAX_CONN 1000
 #define THREAD_MAX_NUM 100
 #define QUEUE_SIZE 1000
 
@@ -31,62 +31,65 @@ typedef struct{
     pthread_mutex_t lock;
     pthread_cond_t queue_not_full;
     pthread_cond_t queue_not_empty;
-    pthread_t *threads;  //å­˜æ”¾çº¿ç¨‹çš„tid
+    pthread_t *threads;  //´æ·ÅÏß³ÌµÄtid
     int *tasks_queue;
-    int thread_num; // çº¿ç¨‹æ•°
+    int thread_num; // Ïß³ÌÊı
     int queue_front;
     int queue_tail;
-    int queue_size; // ä»»åŠ¡æ•°
-    int queue_max_size; //æœ€å¤§ä»»åŠ¡æ•°
-    int shutdown;  //æ˜¯å¦å…³é—­
+    int queue_size; // ÈÎÎñÊı
+    int queue_max_size; //×î´óÈÎÎñÊı
+    // int shutdown;  //ÊÇ·ñ¹Ø±Õ
 }threadpool;
 
 
 int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len);
 void handle_clnt(int clnt_sock);
+void *threadpool_op(void *thread_pool);
 threadpool *threadpool_create(int queue_max_size, int thread_num);
 void threadpool_add_task(int clnt_sock, threadpool *pool);
-void *threadpool_op(void *thread_pool);
 int main(){
-    // åˆ›å»ºå¥—æ¥å­—ï¼Œå‚æ•°è¯´æ˜ï¼š
-    //   AF_INET: ä½¿ç”¨ IPv4
-    //   SOCK_STREAM: é¢å‘è¿æ¥çš„æ•°æ®ä¼ è¾“æ–¹å¼
-    //   IPPROTO_TCP: ä½¿ç”¨ TCP åè®®
-    int serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    // ´´½¨Ì×½Ó×Ö£¬²ÎÊıËµÃ÷£º
+    //   AF_INET: Ê¹ÓÃ IPv4
+    //   SOCK_STREAM: ÃæÏòÁ¬½ÓµÄÊı¾İ´«Êä·½Ê½
+    //   IPPROTO_TCP: Ê¹ÓÃ TCP Ğ­Òé
 
-    // å°†å¥—æ¥å­—å’ŒæŒ‡å®šçš„ IPã€ç«¯å£ç»‘å®š
-    //   ç”¨ 0 å¡«å…… serv_addrï¼ˆå®ƒæ˜¯ä¸€ä¸ª sockaddr_in ç»“æ„ä½“ï¼‰
+    int serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    threadpool *pool = threadpool_create(QUEUE_SIZE,THREAD_MAX_NUM);
+  
+    // ½«Ì×½Ó×ÖºÍÖ¸¶¨µÄ IP¡¢¶Ë¿Ú°ó¶¨
+    //   ÓÃ 0 Ìî³ä serv_addr£¨ËüÊÇÒ»¸ö sockaddr_in ½á¹¹Ìå£©
     struct sockaddr_in serv_addr;
     memset(&serv_addr, 0, sizeof(serv_addr));
-    //   è®¾ç½® IPv4
-    //   è®¾ç½® IP åœ°å€
-    //   è®¾ç½®ç«¯å£
+    //   ÉèÖÃ IPv4
+    //   ÉèÖÃ IP µØÖ·
+    //   ÉèÖÃ¶Ë¿Ú
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = inet_addr(BIND_IP_ADDR);
     serv_addr.sin_port = htons(BIND_PORT);
-    //   ç»‘å®š
+    //   °ó¶¨
     bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-
-    // ä½¿å¾— serv_sock å¥—æ¥å­—è¿›å…¥ç›‘å¬çŠ¶æ€ï¼Œå¼€å§‹ç­‰å¾…å®¢æˆ·ç«¯å‘èµ·è¯·æ±‚
+    
+    // Ê¹µÃ serv_sock Ì×½Ó×Ö½øÈë¼àÌı×´Ì¬£¬¿ªÊ¼µÈ´ı¿Í»§¶Ë·¢ÆğÇëÇó
     listen(serv_sock, MAX_CONN);
-
-    // æ¥æ”¶å®¢æˆ·ç«¯è¯·æ±‚ï¼Œè·å¾—ä¸€ä¸ªå¯ä»¥ä¸å®¢æˆ·ç«¯é€šä¿¡çš„æ–°çš„ç”Ÿæˆçš„å¥—æ¥å­— clnt_sock
+ 
+    // ½ÓÊÕ¿Í»§¶ËÇëÇó£¬»ñµÃÒ»¸ö¿ÉÒÔÓë¿Í»§¶ËÍ¨ĞÅµÄĞÂµÄÉú³ÉµÄÌ×½Ó×Ö clnt_sock
     struct sockaddr_in clnt_addr;
     socklen_t clnt_addr_size = sizeof(clnt_addr);
-    threadpool *pool = threadpool_create(QUEUE_SIZE,THREAD_MAX_NUM);
+
     while(1){
-        // å½“æ²¡æœ‰å®¢æˆ·ç«¯è¿æ¥æ—¶ï¼Œaccept() ä¼šé˜»å¡ç¨‹åºæ‰§è¡Œï¼Œç›´åˆ°æœ‰å®¢æˆ·ç«¯è¿æ¥è¿›æ¥
+        // µ±Ã»ÓĞ¿Í»§¶ËÁ¬½ÓÊ±£¬accept() »á×èÈû³ÌĞòÖ´ĞĞ£¬Ö±µ½ÓĞ¿Í»§¶ËÁ¬½Ó½øÀ´
         int clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_addr, &clnt_addr_size);
-        // å¤„ç†å®¢æˆ·ç«¯çš„è¯·æ±‚
+        // ´¦Àí¿Í»§¶ËµÄÇëÇó
         // handle_clnt(clnt_sock);
         if(clnt_sock == -1){
             handleError("accept error\n");
         }
         threadpool_add_task(clnt_sock, pool);
+      
     }
 
-    // å®é™…ä¸Šè¿™é‡Œçš„ä»£ç ä¸å¯åˆ°è¾¾ï¼Œå¯ä»¥åœ¨ while å¾ªç¯ä¸­æ”¶åˆ° SIGINT ä¿¡å·æ—¶ä¸»åŠ¨ break
-    // å…³é—­å¥—æ¥å­—
+    // Êµ¼ÊÉÏÕâÀïµÄ´úÂë²»¿Éµ½´ï£¬¿ÉÒÔÔÚ while Ñ­»·ÖĞÊÕµ½ SIGINT ĞÅºÅÊ±Ö÷¶¯ break
+    // ¹Ø±ÕÌ×½Ó×Ö
     close(serv_sock);
     return 0;
 }
@@ -95,13 +98,14 @@ threadpool *threadpool_create(int queue_max_size, int thread_num){
     if(!pool){
         handleError("threadpool malloc fail\n");
     }
+    //³õÊ¼»¯
     pool->queue_front = 0;
     pool->queue_size  = 0;
     pool->thread_num = thread_num;
     pool->queue_tail = 0;
-    pool->shutdown = 0;
+    // pool->shutdown = 0;
     pool->queue_max_size = queue_max_size;
-    //ä¸ºçº¿ç¨‹å¼€è¾Ÿç›¸åº”çš„ç©ºé—´
+    //ÎªÏß³Ì¿ª±ÙÏàÓ¦µÄ¿Õ¼ä
     pool->threads = (pthread_t *)malloc(thread_num * sizeof(pthread_t));
     if(!pool->threads){
         handleError("threads malloc fail\n");
@@ -110,7 +114,7 @@ threadpool *threadpool_create(int queue_max_size, int thread_num){
     if(!pool->tasks_queue){
         handleError("tasks_queue malloc fail\n");
     }
-    //åˆå§‹åŒ–äº’æ–¥é”
+    //³õÊ¼»¯»¥³âËø
     if(pthread_mutex_init(&(pool->lock), NULL) != 0){
         handleError("lock init fail\n");
     }
@@ -120,24 +124,26 @@ threadpool *threadpool_create(int queue_max_size, int thread_num){
     if(pthread_cond_init(&(pool->queue_not_full), NULL) != 0){
         handleError("queue_not_full init fail\n");
     }
-    // å¯åŠ¨çº¿ç¨‹
+    // Æô¶¯Ïß³Ì
     for(int i = 0; i < thread_num; i++){
         pthread_create(&(pool->threads[i]), NULL, threadpool_op, (void*)pool);
     }
     return pool;
 }
-
-
 void threadpool_add_task(int clnt_sock, threadpool *pool){
     pthread_mutex_lock(&(pool->lock));
-    //é˜Ÿæ»¡åˆ™é˜»å¡
-    while(pool->queue_size == pool->queue_max_size){
+    //¶ÓÂúÔò×èÈû£¬Ñ­»·¶ÓÁĞ£¬ËùÒÔ-1
+    while(pool->queue_size == pool->queue_max_size - 1){
         pthread_cond_wait(&(pool->queue_not_full), &(pool->lock));
     }
+    //Ìí¼Ótask
     pool->queue_size++;
     pool->tasks_queue[pool->queue_tail] = clnt_sock;
     pool->queue_tail = (pool->queue_tail + 1) % (pool->queue_max_size);
-    pthread_cond_broadcast(&(pool->queue_not_empty));
+    if(pool->queue_size > 0){
+        pthread_cond_broadcast(&(pool->queue_not_empty));    
+    }
+
     pthread_mutex_unlock(&(pool->lock));
 }
 void *threadpool_op(void *thread_pool){
@@ -145,27 +151,30 @@ void *threadpool_op(void *thread_pool){
     int task;
     while(1){
         pthread_mutex_lock(&(pool->lock)); //
-        //é˜Ÿåˆ—ä¸ºç©º
-        while(pool->queue_size == 0 && (!pool->shutdown)){
-            //ç­‰å¾…é˜Ÿåˆ—ä¸ä¸ºç©º
+        //¶ÓÁĞÎª¿Õ
+        while(pool->queue_size == 0 ){
+            //µÈ´ı¶ÓÁĞ²»Îª¿Õ
             pthread_cond_wait(&(pool->queue_not_empty), &(pool->lock));
         }
+        //È¡³ötask
         int clnt_sock = pool->tasks_queue[pool->queue_front];
         pool->queue_size--;
         pool->queue_front = (pool->queue_front + 1) % (pool->queue_max_size);
+        //Í¨Öª¿ÉÒÔÓĞĞÂµÄtask¼ÓÈë
         pthread_cond_broadcast(&(pool->queue_not_full));
-        //å–å‡ºä»»åŠ¡åé‡Šæ”¾çº¿ç¨‹æ± é”
+        //È¡³öÈÎÎñºóÊÍ·ÅÏß³Ì³ØËø
         pthread_mutex_unlock(&(pool->lock));
         handle_clnt(clnt_sock);
     }
 }
 int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len){
     char* req = request;
-    //åˆ¤æ–­æ˜¯å¦ä¸ºGETï¼Œä»¥ä¸‹è¯´æ˜è¯·æ±‚å¤´ä¸å¯¹
+    //ÅĞ¶ÏÊÇ·ñÎªGET£¬ÒÔÏÂËµÃ÷ÇëÇóÍ·²»¶Ô
+    // printf("%s\n", req);
     if(strlen(req) < 5 || strncmp(req, "GET /", 5) != 0){
         return -1;
     }
-    // è·å–è·¯å¾„
+    // »ñÈ¡Â·¾¶
     size_t begin_index = 3;
     req[begin_index] = '.';
     size_t end_index = 5;
@@ -177,7 +186,7 @@ int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len)
                 layer--;
             }
             if(layer < 0){
-                return -1; // è¡¨ç¤ºè·³å‡ºå½“å‰ç›®å½•
+                return -1; // ±íÊ¾Ìø³öµ±Ç°Ä¿Â¼
             }
             break;
         }
@@ -201,15 +210,18 @@ int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len)
     path[end_index - begin_index] = '\0';
     // printf("%s\n", path);
     *path_len = end_index - begin_index;
-    // åˆ¤æ–­å¿…è¦è¯·æ±‚å†…å®¹æ˜¯å¦å®Œæ•´
+    // ÅĞ¶Ï±ØÒªÇëÇóÄÚÈİÊÇ·ñÍêÕû
     char *restHead = "HTTP/1.0\r\nHost: 127.0.0.1:8000"; 
-    if(strncmp(req + end_index + 1, restHead, strlen(restHead)) != 0){
+    //debug·¢ÏÖsiegeÎŞ·¨ÔËĞĞ£¬ÊÇ¸Ã´¦ÎªHTTP/1.1
+    char *restHead2 = "HTTP/1.1\r\nHost: 127.0.0.1:8000"; 
+    if(strncmp(req + end_index + 1, restHead, strlen(restHead)) != 0 &&
+    strncmp(req + end_index + 1, restHead2, strlen(restHead)) != 0){
         return -1;
     }
     return 0;
 }
 void handle_clnt(int clnt_sock){
-    // è¯»å–å®¢æˆ·ç«¯å‘é€æ¥çš„æ•°æ®ï¼Œå¹¶è§£æ
+    // ¶ÁÈ¡¿Í»§¶Ë·¢ËÍÀ´µÄÊı¾İ£¬²¢½âÎö
     char* req_buf = (char*) malloc( MAX_RECV_LEN * sizeof(char));
     char* req = (char*) malloc( MAX_RECV_LEN * sizeof(char)); 
     char* path = (char*) malloc(MAX_PATH_LEN * sizeof(char));
@@ -220,38 +232,37 @@ void handle_clnt(int clnt_sock){
     }
     req[0] = '\0';
     ssize_t req_len = 0;
-    // è¯»å–
+    // ¶ÁÈ¡
     while(1){
         req_len = read(clnt_sock, req_buf, MAX_RECV_LEN - 1);  
-        if(req_len < 0){ // å¤„ç†è¯»å–é”™è¯¯
+        if(req_len < 0){ // ´¦Àí¶ÁÈ¡´íÎó
             perror("failed to read client_socket\n");
             exit(1);
         }
-        //è¯´æ˜ä¸Šä¸€æ¬¡å¾ªç¯æ²¡è¾¾åˆ°é€€å‡ºæ¡ä»¶ï¼Œä½†è¯»å®Œæ•°æ®ï¼Œå³æœ‰é”™è¯¯
-        if(req_len == 0){ // å¤„ç†æ ¼å¼é”™è¯¯
+        //ËµÃ÷ÉÏÒ»´ÎÑ­»·Ã»´ïµ½ÍË³öÌõ¼ş£¬µ«¶ÁÍêÊı¾İ£¬¼´ÓĞ´íÎó
+        if(req_len == 0){ // ´¦Àí¸ñÊ½´íÎó
             perror("Error request tail\n");
             exit(1);
         }
         req_buf[req_len] = '\0';
         strcat(req, req_buf);
-        //åå››ä¸ªå­—ç¬¦ä¸º\r\n\r\n, åˆ™è¯´æ˜è¯»å–å®Œæˆ
+        //ºóËÄ¸ö×Ö·ûÎª\r\n\r\n, ÔòËµÃ÷¶ÁÈ¡Íê³É
         if(strcmp(req + strlen(req) - 4, "\r\n\r\n") == 0){
             break;
         }
     }
-    // æ ¹æ® HTTP è¯·æ±‚çš„å†…å®¹ï¼Œè§£æèµ„æºè·¯å¾„å’Œ Host å¤´
+    // ¸ù¾İ HTTP ÇëÇóµÄÄÚÈİ£¬½âÎö×ÊÔ´Â·¾¶ºÍ Host Í·
     req_len = strlen(req);
     ssize_t path_len;
     
     int parse_ret = parse_request(req, req_len, path, &path_len);   
   
-    //å¤„ç†500
+    //´¦Àí500
     if(parse_ret == -1){
         sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
         size_t response_len = strlen(response);
         if(write(clnt_sock,response,response_len) == -1){
-            perror("Write Error\n");
-            exit(1);
+            handleError("Write Error\n");
         }
         close(clnt_sock);
         free(req);
@@ -260,10 +271,11 @@ void handle_clnt(int clnt_sock){
         free(response);
         return;
     }
-    // å¤„ç†æ–‡ä»¶
+    // ´¦ÀíÎÄ¼ş
+    // printf("%s\n", path);
     int fd = open(path, O_RDONLY);
-    printf("fd%d\n",fd);
-    if(fd < 0){ //æ–‡ä»¶æ‰“å¼€å¤±è´¥ï¼Œ4004é”™è¯¯
+    // printf("fd  %d\n",fd);
+    if(fd < 0){ //ÎÄ¼ş´ò¿ªÊ§°Ü£¬4004´íÎó
         sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
         size_t response_len = strlen(response);
         if(write(clnt_sock,response,response_len) == -1){
@@ -277,15 +289,14 @@ void handle_clnt(int clnt_sock){
         free(response);
         return;
     }    
-    //åˆ¤æ–­æ–‡ä»¶æ˜¯å¦æ˜¯ç›®å½•
+    //ÅĞ¶ÏÎÄ¼şÊÇ·ñÊÇÄ¿Â¼
     struct stat fs;
     stat(path, &fs);
     if(S_ISDIR(fs.st_mode)){
         sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
         size_t response_len = strlen(response);
         if(write(clnt_sock,response,response_len) == -1){
-            perror("Write Error\n");
-            exit(1);
+            handleError("Write Error\n");
         }
         close(clnt_sock);
         free(req);
@@ -294,26 +305,23 @@ void handle_clnt(int clnt_sock){
         free(response);
         return;
     } 
-    //æ­£å¸¸å¤„ç†   
+    //Õı³£´¦Àí   
     sprintf(response,
         "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n",
         HTTP_STATUS_200, (size_t)(fs.st_size));
     size_t response_len = strlen(response);
     if(write(clnt_sock,response,response_len) == -1){
-        perror("Write Error\n");
-        exit(1);
+        handleError("Write Error\n");
     }
-    //å†™å›è¯»å–æ–‡ä»¶å†…å®¹
+    //Ğ´»Ø¶ÁÈ¡ÎÄ¼şÄÚÈİ
     while((response_len = read(fd, response, MAX_SEND_LEN)) > 0){
-        printf("res :%s\n", response);
+        // printf("res :%s\n", response);
         if(write(clnt_sock, response, response_len) == -1){
-            perror("Write Error\n");
-            exit(1);
+           handleError("Write Error\n");
         }
     }
-    if(response_len == -1){ //é”™è¯¯
-        perror("Read Error\n");
-        exit(1);
+    if(response_len == -1){ //´íÎó
+        handleError("Read Error\n");
     }
     close(clnt_sock);
     free(req);
