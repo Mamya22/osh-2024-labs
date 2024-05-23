@@ -18,7 +18,7 @@
 #define MAX_HOST_LEN 1024
 #define MAX_CONN 1000
 #define THREAD_MAX_NUM 100
-#define QUEUE_SIZE 1000
+#define QUEUE_SIZE 1000 
 
 #define HTTP_STATUS_200 "200 OK"
 #define HTTP_STATUS_500 "500 Internal Server Error"

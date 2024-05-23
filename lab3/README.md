@@ -8,6 +8,7 @@
 │  ├─src
 │  │  └─server.c    # 线程池实现
 │  │  └─server_epoll.c   # epoll实现
+│  │  └─unchanged.c   # 原函数
 │  └─README.md     # 实验报告
 ```
 ## 编译运行方法
@@ -18,8 +19,6 @@ gcc -g server.c -o server
 gcc -g server_epoll.c -o epoll
 ./epoll
 ```
-## 实验原理
-
 ## 实验设计
 ### 解析和检验HTTP头
 主要包含`parse_request`和`handle_clnt`两个函数
@@ -69,26 +68,44 @@ gcc -g server_epoll.c -o epoll
 - 具体实现方式
     - 首先创建`event_list`对象，并设置非阻塞。接着调用`epoll_ctl`添加要调用的`server_socket`。`server_socket`接收数据，改变`event_list`队表
     - 当`event_list[i].data.fd == server_socket`时，表示有新连接，则循环接收请求，并设置非阻塞，添加至就绪队列。同时设置为边缘触发`EPOLLIN | EPOLLET`。
-    - 当`event_list[i].events == EPOLLIN`时，进行读处理，此时调用`handle_clnt`函数解析请求（与线程池相比，该handle_clnt函数中删去了写入客户端的部分），如果文件可以正常打开返回文件描述符，并更改event状态，否则返回值为-1或-2，表示不同错误类型。
+    - 当`event_list[i].events == EPOLLIN`时，进行读处理，此时调用`handle_clnt`函数解析请求（与线程池相比，该handle_clnt函数中删去了正常文件写入客户端的部分），如果文件可以正常打开返回文件描述符，并更改event状态，否则返回值为-1或-2，表示不同错误类型。
     - 当`event_list[i].events == EPOLLOUT`时，执行写入客户端操作，根据上个部分的返回值判断写回数据。如果上部分的返回值为文件描述符，则循环调用`sendfile`函数写入客户端，直到文件写入完全，并关闭客户端。
 
 ## 实验结果
 ### 结果测试
 - 正常情况
-    ![alt text](image.png)
+    ![alt text](png/image.png)
 <br>
 - 目录
-    ![alt text](image-1.png)
+    ![alt text](png/image-1.png)
 <br>
 - 文件不存在
-    ![alt text](image-2.png)
+    ![alt text](png/image-2.png)
 <br>
 - 跳出当前目录
-    ![alt text](image-3.png)
+    ![alt text](png/image-3.png)
 <br>
 - 请求头不是GET
-    ![alt text](image-4.png)
+    ![alt text](png/image-4.png)
 
 ### 性能测试
+- 未优化版本
+    ![alt text](png/image-7.png)
 - 线程池
-    ![alt text](image-5.png)
+    ![alt text](png/image-5.png)
+- epoll
+    ![alt text](png/image-6.png)
+
+使用`siege -c 100 -r 20 http://127.0.0.1:8000/test.html -v`命令进行测试，可以看出使用线程池和epoll后，`elapsed_time`，`response_time`，`longest_transaction`都有所降低，而`concurrency`，`throughput`，`transaction_rate`都有所升高，说明使用线程池和epoll后并发性，响应时间，传输效率等都得到了优化。
+线程池和epoll相比，各个指标差距不大
+**增加测试文件的大小至约32K**
+线程池
+![alt text](png/image-12.png)
+epoll
+![alt text](png/image-9.png)
+**增加测试文件的大小至约32K**
+epoll
+![alt text](png/image-10.png)
+线程池
+![alt text](png/image-11.png)
+可以看出epoll的并发性更强，最长事务时间较短，而线程池的`transaction_rate`较大，`troughput`较大，两者各有优劣。

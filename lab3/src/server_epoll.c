@@ -19,12 +19,12 @@
 #define MAX_SEND_LEN 1048576
 #define MAX_PATH_LEN 1024
 #define MAX_HOST_LEN 1024
-#define MAX_CONN 20
+#define MAX_CONN 1000
 // #define THREAD_MAX_NUM 100
 // #define QUEUE_SIZE 1000
 #define FD_SIZE 1000
-#define MAX_EVENTS 200
-#define MAX  0x3fffffff
+#define MAX_EVENTS 100
+// #define MAX  0x3fffffff
 
 #define HTTP_STATUS_200 "200 OK"
 #define HTTP_STATUS_500 "500 Internal Server Error"
@@ -310,7 +310,7 @@ int handle_clnt(Relate *relate, int clnt_sock){
         if(write(clnt_sock,response,response_len) == -1){
             handleError("Write Error\n");
         }
-        close(clnt_sock);
+        // close(clnt_sock);
         free(response);  
         free(path);
         // relate->ret = -1;  
@@ -326,7 +326,7 @@ int handle_clnt(Relate *relate, int clnt_sock){
             handleError("Write Error\n");
             // exit(1);
         }
-        close(clnt_sock);
+        // close(clnt_sock);
         free(response);  
         free(path);
         // relate->ret = -2;
@@ -341,7 +341,7 @@ int handle_clnt(Relate *relate, int clnt_sock){
         if(write(clnt_sock,response,response_len) == -1){
             handleError("Write Error\n");
         }
-        close(clnt_sock);
+        // close(clnt_sock);
         free(response);
         free(path);
         // relate->ret = -1;
@@ -349,6 +349,7 @@ int handle_clnt(Relate *relate, int clnt_sock){
     } 
     // printf("%ld\n", fs.st_size); 
     relate->size = fs.st_size;
+    free(response);
     free(path);
     relate->ret = fd;
     return fd;
