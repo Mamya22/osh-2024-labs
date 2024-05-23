@@ -73,7 +73,7 @@ gcc -g server_epoll.c -o epoll
     - 当`event_list[i].events == EPOLLIN`时，进行读处理，此时调用`handle_clnt`函数解析请求（与线程池相比，该handle_clnt函数中删去了正常文件写入客户端的部分），如果文件可以正常打开返回文件描述符，并更改event状态，否则返回值为-1或-2，表示不同错误类型。
     - 当`event_list[i].events == EPOLLOUT`时，执行写入客户端操作，根据上个部分的返回值判断写回数据。如果上部分的返回值为文件描述符，则循环调用`sendfile`函数写入客户端，直到文件写入完全，并关闭客户端。
 
-## 实验结果
+<!-- ## 实验结果 -->
 ### 结果测试
 - 正常情况
     ![alt text](png/image.png)
