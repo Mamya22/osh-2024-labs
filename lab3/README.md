@@ -97,15 +97,15 @@ gcc -g server_epoll.c -o epoll
     ![alt text](png/image-6.png)
 
 使用`siege -c 100 -r 20 http://127.0.0.1:8000/test.html -v`命令进行测试，可以看出使用线程池和epoll后，`elapsed_time`，`response_time`，`longest_transaction`都有所降低，而`concurrency`，`throughput`，`transaction_rate`都有所升高，说明使用线程池和epoll后并发性，响应时间，传输效率等都得到了优化。
-线程池和epoll相比，各个指标差距不大
+线程池和epoll相比，各个指标差距不大<br>
 **增加测试文件的大小至约32K**
-线程池
+- **线程池**
 ![alt text](png/image-12.png)
-epoll
+- **epoll**
 ![alt text](png/image-9.png)
-**增加测试文件的大小至约32K**
-epoll
+**增加测试文件的大小至约32K**<br>
+- **epoll**
 ![alt text](png/image-10.png)
-线程池
+- **线程池**
 ![alt text](png/image-11.png)
 可以看出epoll的并发性更强，最长事务时间较短，而线程池的`transaction_rate`较大，`troughput`较大，两者各有优劣。

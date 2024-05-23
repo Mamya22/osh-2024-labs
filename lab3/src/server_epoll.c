@@ -108,10 +108,10 @@ int handle_epoll(int server_socket){
                 while(1){
                     int clnt_sock = accept(server_socket, (struct sockaddr *)&clnt_addr, &clnt_addr_size);
                     if (clnt_sock == -1) {
-						if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) { //缓存区满，跳出循环
-							break;
-						} else
-							handleError("Accept failed");
+                        if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) { //缓存区满，跳出循环
+                        	break;
+                        } else
+                    	handleError("Accept failed");
 					}
                     //设置非阻塞
                     int flag = fcntl(clnt_sock, F_GETFL, 0);
@@ -151,6 +151,7 @@ int handle_epoll(int server_socket){
             else{
                 Relate *relate = (Relate *)event_list[i].data.ptr;
                 close(relate->fd);
+                free(relate);
             }
         }
     }
@@ -161,55 +162,40 @@ void handle_write(int fd, int clnt_sock, size_t size){
     if(!response){
         handleError("Malloc Error!\n");
     }
-    // if(fd == -1){ // HTTP_500
-    //     sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
-    //     size_t response_len = strlen(response);
-    //     if(write(clnt_sock,response,response_len) == -1){
-    //         handleError("Write Error\n");
-    //     }
-    // }
-    // if(fd == -2){ //HTTP_404
-    //     sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
-    //     size_t response_len = strlen(response);
-    //     if(write(clnt_sock,response,response_len) == -1){
+
+    //正常处理 HTTP_200
+
+    sprintf(response,
+        "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n",
+        HTTP_STATUS_200, (size_t)(size));
+    size_t response_len = strlen(response);
+    if(write(clnt_sock,response,response_len) == -1){
+        perror("Write Error\n");
+        exit(1);
+    }
+    //写回读取文件内容
+    // while((response_len = read(fd, response, MAX_SEND_LEN)) > 0){
+    //     // printf("res :%s\n", response);
+    //     if(write(clnt_sock, response, response_len) == -1){
     //         perror("Write Error\n");
     //         exit(1);
-    //     } 
+    //     }
     // }
-    //正常处理 HTTP_200
-    // else{
-        sprintf(response,
-            "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n",
-            HTTP_STATUS_200, (size_t)(size));
-        size_t response_len = strlen(response);
-        if(write(clnt_sock,response,response_len) == -1){
-            perror("Write Error\n");
-            exit(1);
+    /* sendfile 可能要send多次*/
+    size_t temp_size = size;
+    while (temp_size > 0){
+       int ret = sendfile(clnt_sock, fd, NULL, size);
+        if(ret < 0){
+            handleError("error sendfile\n");
         }
-        //写回读取文件内容
-        // while((response_len = read(fd, response, MAX_SEND_LEN)) > 0){
-        //     // printf("res :%s\n", response);
-        //     if(write(clnt_sock, response, response_len) == -1){
-        //         perror("Write Error\n");
-        //         exit(1);
-        //     }
-        // }
-        /* sendfile 可能要send多次*/
-        size_t temp_size = size;
-        while (temp_size > 0){
-           int ret = sendfile(clnt_sock, fd, NULL, size);
-            if(ret < 0){
-                handleError("error sendfile\n");
-            }
-            temp_size = temp_size - ret;
-        }
-        
-        // if(response_len == -1){ //错误
-        //     perror("Read Error\n");
-        //     exit(1);
-        // }        
-        close(fd);
-    // }  
+        temp_size = temp_size - ret;
+    }
+    
+    // if(response_len == -1){ //错误
+    //     perror("Read Error\n");
+    //     exit(1);
+    // }        
+    close(fd);
     close(clnt_sock);
     free(response);
 }
