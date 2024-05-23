@@ -38,7 +38,6 @@ typedef struct{
     int queue_tail;
     int queue_size; // 任务数
     int queue_max_size; //最大任务数
-    // int shutdown;  //是否关闭
 }threadpool;
 
 
@@ -232,6 +231,7 @@ void handle_clnt(int clnt_sock){
     }
     req[0] = '\0';
     ssize_t req_len = 0;
+    int flag = 0;
     // 读取
     while(1){
         req_len = read(clnt_sock, req_buf, MAX_RECV_LEN - 1);  
@@ -241,8 +241,8 @@ void handle_clnt(int clnt_sock){
         }
         //说明上一次循环没达到退出条件，但读完数据，即有错误
         if(req_len == 0){ // 处理格式错误
-            perror("Error request tail\n");
-            exit(1);
+            flag = 1;
+            break;
         }
         req_buf[req_len] = '\0';
         strcat(req, req_buf);
@@ -251,6 +251,7 @@ void handle_clnt(int clnt_sock){
             break;
         }
     }
+
     // 根据 HTTP 请求的内容，解析资源路径和 Host 头
     req_len = strlen(req);
     ssize_t path_len;
@@ -258,7 +259,7 @@ void handle_clnt(int clnt_sock){
     int parse_ret = parse_request(req, req_len, path, &path_len);   
   
     //处理500
-    if(parse_ret == -1){
+    if(parse_ret == -1 || flag){
         sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
         size_t response_len = strlen(response);
         if(write(clnt_sock,response,response_len) == -1){
@@ -275,12 +276,12 @@ void handle_clnt(int clnt_sock){
     // printf("%s\n", path);
     int fd = open(path, O_RDONLY);
     // printf("fd  %d\n",fd);
-    if(fd < 0){ //文件打开失败，4004错误
+    if(fd < 0){ //文件打开失败，404错误
         sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
         size_t response_len = strlen(response);
         if(write(clnt_sock,response,response_len) == -1){
-            perror("Write Error\n");
-            exit(1);
+            handleError("Write Error\n");
+            // exit(1);
         }
         close(clnt_sock);
         free(req);
