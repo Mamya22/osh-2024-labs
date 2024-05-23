@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <sys/epoll.h>
 #include <sys/sendfile.h>
+#include <errno.h>
 // #include <pthread.h>
 
 #define BIND_IP_ADDR "127.0.0.1"
@@ -28,13 +29,20 @@
 #define HTTP_STATUS_200 "200 OK"
 #define HTTP_STATUS_500 "500 Internal Server Error"
 #define HTTP_STATUS_404 "404 Not Found"
-int fd_ret[MAX];
+// int fd_ret[MAX];
+//记录相关信息
+typedef struct Relate{
+    int fd;
+    int ret;
+    size_t size;
+}Relate;
+
 void handleError(char *error){
     perror(error);
     exit(EXIT_FAILURE);
 }
 int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len);
-int handle_clnt(int clnt_sock, size_t *size);
+int handle_clnt(Relate *relate, int clnt_sock);
 int handle_epoll(int server_socket);
 void handle_write(int fd, int clnt_sock, size_t  size);
 int main(){
@@ -43,6 +51,8 @@ int main(){
     //   SOCK_STREAM: 面向连接的数据传输方式
     //   IPPROTO_TCP: 使用 TCP 协议
     int serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	int opt = 1;
+	setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     // 将套接字和指定的 IP、端口绑定
     //   用 0 填充 serv_addr（它是一个 sockaddr_in 结构体）
@@ -59,7 +69,7 @@ int main(){
 
     // 使得 serv_sock 套接字进入监听状态，开始等待客户端发起请求
     listen(serv_sock, MAX_CONN);
-    int flag = fcntl(serv_sock,F_GETFL);
+    int flag = fcntl(serv_sock,F_GETFL, 0);
     flag |= O_NONBLOCK;
     fcntl(serv_sock, F_SETFL, flag);
     //设置非阻塞
@@ -70,6 +80,7 @@ int main(){
     close(serv_sock);
     return 0;
 }
+size_t num =0;
 int handle_epoll(int server_socket){
     //创建epoll
     int epoll_fd;
@@ -85,50 +96,74 @@ int handle_epoll(int server_socket){
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &event) == -1){
         handleError("epoll_ctl fail\n");
     }
-    size_t size_ret[MAX_EVENTS] = {0};
+    // size_t size_ret[MAX_EVENTS] = {0};
+    int evnum = 0;
     while (1){
-        int evnum;
         if((evnum = epoll_wait(epoll_fd, event_list, MAX_EVENTS, -1)) == -1){
             handleError("epoll_wait error\n");
         }
+        else{
+           
+            printf("num   %ld\n", num); num++;
+        }
         for(int i = 0; i < evnum; i++){
+            // if ((event_list[i].events & EPOLLERR) ||
+			// 	(event_list[i].events & EPOLLHUP)) { // 连接出错
+			// 	fprintf(stderr, "epoll error\n");
+			// 	close(event_list[i].data.fd);
+			// 	continue;
+			// }
             if(event_list[i].data.fd == server_socket) { //有连接
-                int clnt_sock = accept(server_socket, (struct sockaddr *)&clnt_addr, &clnt_addr_size);
-                //设置非阻塞
-                int flag = fcntl(clnt_sock,F_GETFL);
-                flag |= O_NONBLOCK;
-                fcntl(clnt_sock, F_SETFL, flag);
-                event.events = EPOLLIN | EPOLLET;
-                event.data.fd = clnt_sock;
-                if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, clnt_sock, &event) == -1){
-                    handleError("epoll_ctl fail\n");
+                    printf("event_list[i].data.fd i:%d %d\n", i,event_list[i].data.fd);
+                while(1){
+                    int clnt_sock = accept(server_socket, (struct sockaddr *)&clnt_addr, &clnt_addr_size);
+                    //设置非阻塞
+                    if (clnt_sock == -1) {
+						if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+							break;
+						} else
+							handleError("Accept failed");
+					}
+                    int flag = fcntl(clnt_sock, F_GETFL, 0);
+                    flag |= O_NONBLOCK;
+                    fcntl(clnt_sock, F_SETFL, flag);
+                    Relate *relate = (Relate *)malloc(sizeof(Relate));
+                    relate->fd = clnt_sock;
+                    event.data.ptr = (void *)relate;
+                    event.events = EPOLLIN | EPOLLET;
+                    // event.data.fd = clnt_sock;
+                    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, clnt_sock, &event) == -1){
+                        handleError("epoll_ctl fail\n");
+                    }
                 }
             }
             else if(event_list[i].events == EPOLLIN){
-                size_t size;
-
-                int clnt_ret = handle_clnt(event_list[i].data.fd, &size);
+                // size_t size;
+                Relate *relate = (Relate *)event_list[i].data.ptr;
+                int clnt_ret = handle_clnt(relate, relate->fd);
 
                 //用数组记录对应记录返回值
-                fd_ret[event_list[i].data.fd] = clnt_ret;
-                size_ret[i] = size;
+                // size_ret[i] = size;
 
                 if(clnt_ret != -1 && clnt_ret != -2){
                     event.events   = EPOLLOUT | EPOLLET;
-                    if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, event_list[i].data.fd, &event) == -1){
+                    event.data.ptr = (void *)relate;
+                    if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, relate->fd, &event) == -1){
                         handleError("epoll_ctl fail\n");
                     }
                 }
             }
             else if(event_list[i].events == EPOLLOUT){
-                handle_write(fd_ret[event_list[i].data.fd], event_list[i].data.fd,  size_ret[i]);
-                fd_ret[event_list[i].data.fd] = 0;
+                printf("event_list[i].events i:%d %d\n", i,event_list[i].events);
+                Relate *relate = (Relate *)event_list[i].data.ptr;
+                handle_write(relate->ret, relate->fd,  relate->size);
+                free(relate);
             }
             else{
-                close(event_list[i].data.fd);
+                Relate *relate = (Relate *)event_list[i].data.ptr;
+                close(relate->fd);
             }
         }
-
     }
     
 }
@@ -164,17 +199,26 @@ void handle_write(int fd, int clnt_sock, size_t size){
             exit(1);
         }
         //写回读取文件内容
-        while((response_len = read(fd, response, MAX_SEND_LEN)) > 0){
-            printf("res :%s\n", response);
-            if(write(clnt_sock, response, response_len) == -1){
-                perror("Write Error\n");
-                exit(1);
+        // while((response_len = read(fd, response, MAX_SEND_LEN)) > 0){
+        //     // printf("res :%s\n", response);
+        //     if(write(clnt_sock, response, response_len) == -1){
+        //         perror("Write Error\n");
+        //         exit(1);
+        //     }
+        // }
+        size_t temp_size = size;
+        while (temp_size > 0){
+           int ret = sendfile(clnt_sock, fd, NULL, size);
+            if(ret < 0){
+                handleError("error sendfile\n");
             }
+            temp_size = temp_size - ret;
         }
-        if(response_len == -1){ //错误
-            perror("Read Error\n");
-            exit(1);
-        }        
+        
+        // if(response_len == -1){ //错误
+        //     perror("Read Error\n");
+        //     exit(1);
+        // }        
         close(fd);
     }  
     close(clnt_sock);
@@ -232,7 +276,7 @@ int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len)
     }
     return 0;
 }
-int handle_clnt(int clnt_sock, size_t *size){
+int handle_clnt(Relate *relate, int clnt_sock){
     // 读取客户端发送来的数据，并解析
     char* req_buf = (char*) malloc( MAX_RECV_LEN * sizeof(char));
     char* req = (char*) malloc( MAX_RECV_LEN * sizeof(char)); 
@@ -275,6 +319,7 @@ int handle_clnt(int clnt_sock, size_t *size){
         free(response);  
     if(parse_ret == -1){
         free(path);
+        relate->ret = -1;
         return -1;
     }
     // 处理文件
@@ -282,6 +327,7 @@ int handle_clnt(int clnt_sock, size_t *size){
     // printf("fd%d\n",fd);
     if(fd < 0){ //文件打开失败，4004错误
         free(path);
+        relate->ret = -2;
         return -2;
     }    
     //判断文件是否是目录
@@ -289,11 +335,13 @@ int handle_clnt(int clnt_sock, size_t *size){
     stat(path, &fs);
     if(S_ISDIR(fs.st_mode)){
         free(path);
+        relate->ret = -1;
         return -1;
     } 
 
     // printf("%ld\n", fs.st_size); 
-    *size = fs.st_size;
+    relate->size = fs.st_size;
     free(path);
+    relate->ret = fd;
     return fd;
 }
