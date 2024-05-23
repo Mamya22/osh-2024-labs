@@ -19,6 +19,8 @@ gcc -g server.c -o server
 gcc -g server_epoll.c -o epoll
 ./epoll
 ```
+## 实验原理
+
 ## 实验设计
 ### 解析和检验HTTP头
 主要包含`parse_request`和`handle_clnt`两个函数
@@ -103,7 +105,7 @@ gcc -g server_epoll.c -o epoll
 ![alt text](png/image-12.png)
 - **epoll**
 ![alt text](png/image-9.png)
-**增加测试文件的大小至约32K**<br>
+**增加测试文件的大小至约93K**<br>
 - **epoll**
 ![alt text](png/image-10.png)
 - **线程池**
