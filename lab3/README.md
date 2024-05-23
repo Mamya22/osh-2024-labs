@@ -77,15 +77,19 @@ gcc -g server_epoll.c -o epoll
     ![alt text](png/image.png)
 <br>
 - 目录
+
     ![alt text](png/image-1.png)
 <br>
 - 文件不存在
+
     ![alt text](png/image-2.png)
 <br>
 - 跳出当前目录
+
     ![alt text](png/image-3.png)
 <br>
 - 请求头不是GET
+
     ![alt text](png/image-4.png)
 
 ### 性能测试
