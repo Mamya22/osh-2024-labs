@@ -73,7 +73,22 @@ gcc -g server_epoll.c -o epoll
     - 当`event_list[i].events == EPOLLOUT`时，执行写入客户端操作，根据上个部分的返回值判断写回数据。如果上部分的返回值为文件描述符，则循环调用`sendfile`函数写入客户端，直到文件写入完全，并关闭客户端。
 
 ## 实验结果
-### 多线程部分
+### 结果测试
+- 正常情况
+    ![alt text](image.png)
+<br>
+- 目录
+    ![alt text](image-1.png)
+<br>
+- 文件不存在
+    ![alt text](image-2.png)
+<br>
+- 跳出当前目录
+    ![alt text](image-3.png)
+<br>
+- 请求头不是GET
+    ![alt text](image-4.png)
 
-
-
+### 性能测试
+- 线程池
+    ![alt text](image-5.png)

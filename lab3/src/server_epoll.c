@@ -30,6 +30,7 @@
 #define HTTP_STATUS_500 "500 Internal Server Error"
 #define HTTP_STATUS_404 "404 Not Found"
 // int fd_ret[MAX];
+// int size[]
 //记录相关信息
 typedef struct Relate{
     int fd;
@@ -51,8 +52,7 @@ int main(){
     //   SOCK_STREAM: 面向连接的数据传输方式
     //   IPPROTO_TCP: 使用 TCP 协议
     int serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	int opt = 1;
-	setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
 
     // 将套接字和指定的 IP、端口绑定
     //   用 0 填充 serv_addr（它是一个 sockaddr_in 结构体）
@@ -102,28 +102,18 @@ int handle_epoll(int server_socket){
         if((evnum = epoll_wait(epoll_fd, event_list, MAX_EVENTS, -1)) == -1){
             handleError("epoll_wait error\n");
         }
-        else{
-           
-            printf("num   %ld\n", num); num++;
-        }
         for(int i = 0; i < evnum; i++){
-            // if ((event_list[i].events & EPOLLERR) ||
-			// 	(event_list[i].events & EPOLLHUP)) { // 连接出错
-			// 	fprintf(stderr, "epoll error\n");
-			// 	close(event_list[i].data.fd);
-			// 	continue;
-			// }
             if(event_list[i].data.fd == server_socket) { //有连接
-                    printf("event_list[i].data.fd i:%d %d\n", i,event_list[i].data.fd);
+                    // printf("event_list[i].data.fd i:%d %d\n", i,event_list[i].data.fd);
                 while(1){
                     int clnt_sock = accept(server_socket, (struct sockaddr *)&clnt_addr, &clnt_addr_size);
-                    //设置非阻塞
                     if (clnt_sock == -1) {
-						if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+						if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) { //缓存区满，跳出循环
 							break;
 						} else
 							handleError("Accept failed");
 					}
+                    //设置非阻塞
                     int flag = fcntl(clnt_sock, F_GETFL, 0);
                     flag |= O_NONBLOCK;
                     fcntl(clnt_sock, F_SETFL, flag);
@@ -141,10 +131,9 @@ int handle_epoll(int server_socket){
                 // size_t size;
                 Relate *relate = (Relate *)event_list[i].data.ptr;
                 int clnt_ret = handle_clnt(relate, relate->fd);
-
                 //用数组记录对应记录返回值
                 // size_ret[i] = size;
-
+                //正确处理
                 if(clnt_ret != -1 && clnt_ret != -2){
                     event.events   = EPOLLOUT | EPOLLET;
                     event.data.ptr = (void *)relate;
@@ -154,7 +143,7 @@ int handle_epoll(int server_socket){
                 }
             }
             else if(event_list[i].events == EPOLLOUT){
-                printf("event_list[i].events i:%d %d\n", i,event_list[i].events);
+                // printf("event_list[i].events i:%d %d\n", i,event_list[i].events);
                 Relate *relate = (Relate *)event_list[i].data.ptr;
                 handle_write(relate->ret, relate->fd,  relate->size);
                 free(relate);
@@ -172,24 +161,23 @@ void handle_write(int fd, int clnt_sock, size_t size){
     if(!response){
         handleError("Malloc Error!\n");
     }
-    if(fd == -1){
-
-        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
-        size_t response_len = strlen(response);
-        if(write(clnt_sock,response,response_len) == -1){
-            handleError("Write Error\n");
-        }
-    }
-    if(fd == -2){
-        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
-        size_t response_len = strlen(response);
-        if(write(clnt_sock,response,response_len) == -1){
-            perror("Write Error\n");
-            exit(1);
-        } 
-    }
-    //正常处理 
-    else{
+    // if(fd == -1){ // HTTP_500
+    //     sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
+    //     size_t response_len = strlen(response);
+    //     if(write(clnt_sock,response,response_len) == -1){
+    //         handleError("Write Error\n");
+    //     }
+    // }
+    // if(fd == -2){ //HTTP_404
+    //     sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
+    //     size_t response_len = strlen(response);
+    //     if(write(clnt_sock,response,response_len) == -1){
+    //         perror("Write Error\n");
+    //         exit(1);
+    //     } 
+    // }
+    //正常处理 HTTP_200
+    // else{
         sprintf(response,
             "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n",
             HTTP_STATUS_200, (size_t)(size));
@@ -206,6 +194,7 @@ void handle_write(int fd, int clnt_sock, size_t size){
         //         exit(1);
         //     }
         // }
+        /* sendfile 可能要send多次*/
         size_t temp_size = size;
         while (temp_size > 0){
            int ret = sendfile(clnt_sock, fd, NULL, size);
@@ -220,10 +209,9 @@ void handle_write(int fd, int clnt_sock, size_t size){
         //     exit(1);
         // }        
         close(fd);
-    }  
+    // }  
     close(clnt_sock);
     free(response);
-
 }
 int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len){
     char* req = request;
@@ -236,7 +224,6 @@ int parse_request(char* request, ssize_t req_len, char* path, ssize_t* path_len)
     req[begin_index] = '.';
     size_t end_index = 5;
     ssize_t layer = 0;
-    
     while (end_index - begin_index < MAX_PATH_LEN){
         if(req[end_index] == ' '){
             if(req[end_index - 1] == '.' && req[end_index - 2] == '.'){
@@ -288,6 +275,7 @@ int handle_clnt(Relate *relate, int clnt_sock){
     }
     req[0] = '\0';
     ssize_t req_len = 0;
+    int flag = 0;
     // 读取
     while(1){
         req_len = read(clnt_sock, req_buf, MAX_RECV_LEN - 1);  
@@ -297,8 +285,8 @@ int handle_clnt(Relate *relate, int clnt_sock){
         }
         //说明上一次循环没达到退出条件，但读完数据，即有错误
         if(req_len == 0){ // 处理格式错误
-            perror("Error request tail\n");
-            exit(1);
+            flag = 1;
+            break;
         }
         req_buf[req_len] = '\0';
         strcat(req, req_buf);
@@ -310,35 +298,55 @@ int handle_clnt(Relate *relate, int clnt_sock){
     // 根据 HTTP 请求的内容，解析资源路径和 Host 头
     req_len = strlen(req);
     ssize_t path_len;
-    
     int parse_ret = parse_request(req, req_len, path, &path_len);   
     //处理500
         free(req);
         free(req_buf);
         // free(path);
+        
+    if(parse_ret == -1 || flag){
+        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
+        size_t response_len = strlen(response);
+        if(write(clnt_sock,response,response_len) == -1){
+            handleError("Write Error\n");
+        }
+        close(clnt_sock);
         free(response);  
-    if(parse_ret == -1){
         free(path);
-        relate->ret = -1;
+        // relate->ret = -1;  
         return -1;
     }
     // 处理文件
     int fd = open(path, O_RDONLY);
     // printf("fd%d\n",fd);
     if(fd < 0){ //文件打开失败，4004错误
+        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_404, (size_t)0);
+        size_t response_len = strlen(response);
+        if(write(clnt_sock,response,response_len) == -1){
+            handleError("Write Error\n");
+            // exit(1);
+        }
+        close(clnt_sock);
+        free(response);  
         free(path);
-        relate->ret = -2;
+        // relate->ret = -2;
         return -2;
     }    
     //判断文件是否是目录
     struct stat fs;
     stat(path, &fs);
     if(S_ISDIR(fs.st_mode)){
+        sprintf(response, "HTTP/1.0 %s\r\nContent-Length: %zd\r\n\r\n", HTTP_STATUS_500, (size_t)0);
+        size_t response_len = strlen(response);
+        if(write(clnt_sock,response,response_len) == -1){
+            handleError("Write Error\n");
+        }
+        close(clnt_sock);
+        free(response);
         free(path);
-        relate->ret = -1;
+        // relate->ret = -1;
         return -1;
     } 
-
     // printf("%ld\n", fs.st_size); 
     relate->size = fs.st_size;
     free(path);
