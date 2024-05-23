@@ -75,21 +75,17 @@ gcc -g server_epoll.c -o epoll
 ### 结果测试
 - 正常情况
     ![alt text](png/image.png)
-<br>
+<!-- <br> -->
 - 目录
-
-    ![alt text](png/image-1.png)
-<br>
+    ![dir](png/image-1.png)
+<!-- <br> -->
 - 文件不存在
-
     ![alt text](png/image-2.png)
-<br>
+<!-- <br> -->
 - 跳出当前目录
-
     ![alt text](png/image-3.png)
-<br>
+<!-- <br> -->
 - 请求头不是GET
-
     ![alt text](png/image-4.png)
 
 ### 性能测试
